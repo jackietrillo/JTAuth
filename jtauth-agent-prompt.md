@@ -1,0 +1,173 @@
+# JTAuth — Build Prompt
+
+## 0. Goal
+
+Build **JTAuth**, the shared, passwordless identity service for all of Jackie Trillo's apps. Every app (CityBars first; later a bar-owner portal, MenuGenerator, …) signs its users in through JTAuth, so a person has **one account** across all of them. JTAuth knows **nothing** about any app's domain: no bars, cities, menus or app preferences. It answers only "who is this, and which app is this token for".
+
+- The code name is **`JTAuth`** (root namespace, solution, repo, database, Azure resource prefix). `JT` is the umbrella for Jackie Trillo's apps.
+- Apps depend on JTAuth; **JTAuth never depends on an app** (no app names in code, only in seed data for registered clients).
+- First consumer: **CityBars** (`C:\JTRepos\CityBars`, spec `citybars-agent-prompt.md`, Section 4.4c), registered as client `citybars`.
+
+**Reference:** CityBars uses the same stack, layering and conventions; when in doubt, match it. `JTAuth.BuildingBlocks` is a copy of `CityBars.BuildingBlocks` (handler abstractions, decorators, `Result<T>`, `AddHandlers`). When a third repository needs it, turn it into a NuGet package instead of copying again.
+
+---
+
+## 1. Stack
+
+- **Backend:** C# / .NET 10, ASP.NET Core
+- **Architecture:** Clean Architecture + CQRS (light) with directly injected handlers and **no mediator library** (Section 4)
+- **Data access:** Dapper on MSSQL, in the `JTAuth` database. Local development uses a locally running SQL Server (Developer or Express); the same scripts and code run unchanged against Azure SQL. No EF Core, no ASP.NET Core Identity.
+- **Tokens:** JWTs signed with an asymmetric key (RS256 or ES256) using `Microsoft.IdentityModel.JsonWebTokens`; Google ID tokens validated with Google's published keys.
+- **Email:** Azure Communication Services Email in Azure; the log in Development.
+- **Scripting:** PowerShell (DB deploy, run, test, provisioning)
+- **Hosting (Azure):** Azure SQL, App Service or Container Apps for the API, Key Vault for the signing key and the Google OAuth client secret, Application Insights, managed identity wherever possible. Bicep, driven by PowerShell.
+
+---
+
+## 2. Naming and configuration
+
+- Root namespace / solution / repo: **`JTAuth`**; projects `JTAuth.<Layer>` (`JTAuth.Application`, …).
+- Database: **`JTAuth`**, every table in `dbo`. Connection string: `ConnectionStrings:JTAuthDb`.
+- Azure resource prefix from a single parameter, e.g. `jta-<env>-<resource>`.
+- Issuer: `JTAuth:Issuer` (the API's public base URL). Signing key: Key Vault in Azure; a development key file outside the repo locally (generated on first run, never committed).
+- No app name appears in code. Registered apps are rows in `Client` (seed).
+- Store timestamps in UTC (`datetime2(3)`).
+
+### 2b. Local-first database
+
+- Local default: `Server=localhost;Database=JTAuth;Trusted_Connection=True;TrustServerCertificate=True;`. With a named instance (for example `localhost\SQLEXPRESS`), set the user environment variable `ConnectionStrings__JTAuthDb` once; the API and the scripts read it.
+- `scripts/deploy-db.ps1 -Environment local|azure` applies the same migrations either way; locally it creates the database if needed, on Azure the database comes from Bicep and sign-in uses Microsoft Entra ID.
+
+---
+
+## 3. Repository and folder structure
+
+```
+JTAuth/
+├─ README.md
+├─ JTAuth.sln
+├─ jtauth-agent-prompt.md          # this spec
+├─ global.json, Directory.Build.props, Directory.Packages.props, .editorconfig, nuget.config, .gitignore
+├─ docs/
+│  └─ architecture.md              # decisions (ADRs), token flow
+├─ database/
+│  ├─ migrations/                  # numbered, forward-only SQL scripts (DbUp)
+│  ├─ seed/                        # the registered client apps
+│  ├─ schema.sql                   # full reference schema
+│  └─ JTAuth.Database/             # DbUp migrator (console), run by deploy-db.ps1
+├─ infra/bicep/
+├─ scripts/
+│  ├─ deploy-db.ps1
+│  ├─ run-local.ps1
+│  └─ provision-azure.ps1
+├─ JTAuth.BuildingBlocks/          # handler interfaces, decorators, Result, Registration/ (copied from CityBars)
+├─ JTAuth.Contracts/               # API request/response DTOs only
+├─ JTAuth.Domain/
+├─ JTAuth.Application/
+├─ JTAuth.Infrastructure/
+├─ JTAuth.Api/                     # the only host
+└─ tests/
+   ├─ JTAuth.UnitTests/
+   ├─ JTAuth.IntegrationTests/     # Dapper against real SQL Server (local or Testcontainers)
+   └─ JTAuth.ArchitectureTests/
+```
+
+The projects sit at the repository root — there is no `src/` folder.
+
+---
+
+## 4. Architecture
+
+Same rules as CityBars (its Sections 4.2–4.4b), in one service:
+
+- **Domain** has no dependencies. **Application** depends on Domain, BuildingBlocks and Contracts, never on Dapper, ASP.NET, Azure SDKs or `System.Data`. **Infrastructure** implements Application's interfaces (repositories, token signer, email sender, Google token validator). **Api** is the composition root.
+- One handler per command or query, injected by interface; cross-cutting decorators (logging, timing, exception mapping, validation) applied by `services.AddHandlers(assembly)`. No mediator, no `Send()`.
+- Versioned routes `/api/v1/...`, `ProblemDetails` errors, `/health/live` and `/health/ready`, structured logging with correlation ids, OpenTelemetry, Swagger UI at `/swagger` in Development.
+
+### 4.1 Sign-in (passwordless)
+
+**There are no passwords anywhere** — no password column, no reset flow.
+
+- **Phase one methods:** Google Sign-In, and a **one-time code sent by email**. **Phone (text-message code) is designed in but not built**: the `Phone` provider value and the code flow already allow for it, so adding it later means adding a message sender, not changing the model.
+- **Signing up and signing in are the same flow.** The user enters an email, receives a 6-digit code, and enters it. If no account has that email, one is created and the response says `isNewUser`, so the app can ask for a display name (and its own extra fields, such as CityBars' city) before continuing.
+- **Code rules:** 6 digits, valid for 10 minutes, single use, stored only as a hash, invalidated after 5 wrong attempts. Requesting a new code invalidates the previous one. Rate-limit requests per address and per IP (for example 1 per minute and 5 per hour). The request endpoint always answers the same way whether or not the address has an account.
+- **Uniqueness:** each email address and each phone number belongs to at most one account — unique **individually**, never as a pair — enforced by the unique key on `UserIdentity (Provider, ProviderSubject)`. Store emails trimmed and lower-cased and phone numbers in E.164 format. A user can have one identity per provider and sign in with any of them.
+- **Linking:** a Google sign-in whose verified email matches an existing Email identity signs in to that same account and adds the Google identity, instead of creating a second account.
+- **Sending:** codes go through an `IEmailSender` interface in JTAuth.Application (with an `ISmsSender` beside it for later). In Development the implementation writes the code to the log. In Azure it uses Azure Communication Services Email. The email names the requesting app ("Your CityBars code is 123456") using the client's `Name`.
+
+### 4.2 Clients and tokens
+
+- **Apps are registered clients.** Each app is a row in `Client` (seeded). Every request that starts a sign-in carries the app's `clientId`; an unknown or disabled client is refused.
+- **Access tokens:** short-lived (15 minutes) JWTs signed with an asymmetric key, with `iss` (JTAuth), `aud` (the client's `Audience`), `sub` (the user id, a Guid), `name` (display name, when set), `iat`, `exp` and `jti`. A token issued to one app is rejected by another because of `aud`.
+- **Published keys:** `GET /.well-known/jwks.json` (public keys, with `kid`) and `GET /.well-known/openid-configuration` (issuer and JWKS URL), so apps validate tokens with the stock `AddJwtBearer` setup — no shared secret and no custom code. Key rotation: publish the new key before signing with it; keep the old one published until its tokens expire.
+- **Refresh tokens:** opaque random values, stored only as a hash, bound to one user and one client, 30-day lifetime, **rotated on every use** (the old one is revoked; reuse of a revoked token revokes the whole chain for that user and client). `/logout` revokes the presented token.
+- **Permissions stay in the apps.** JTAuth never stores what a user may do inside an app. In phase one any registered, enabled client accepts any user. Restricting who may sign in to an app (for example an invite-only internal tool) is a later, additive change: a migration adds `Client.AccessMode` (`Open` by default, or `Restricted`) and a `UserClient` table (UserId, ClientId, GrantedUtc, LastSignInUtc, RevokedUtc), and token issuing checks it next to the enabled-client check.
+- **Later:** if full OpenID Connect is ever needed (third-party apps signing in through JTAuth, single sign-on across domains), move to OpenIddict or a hosted provider; the token shape stays the same, so apps barely change.
+
+---
+
+## 5. Data model (MSSQL, the `JTAuth` database)
+
+Everything in `dbo`. Apps keep their own data in their own databases, keyed by the user id; there are no foreign keys to or from other databases.
+
+- **Client:** Id (`int IDENTITY`, fixed in the seed), ClientId (`varchar(50)`, unique — e.g. `citybars`), Name (shown in sign-in emails), Audience (the `aud` claim), IsEnabled, CreatedUtc. Seed `citybars`.
+- **User:** Id (`uniqueidentifier`, `NEWSEQUENTIALID()` — the JWT `sub`; never guessable, never reveals user counts), DisplayName (nullable until the new-user step; the JWT `name`), CreatedUtc. No password and no email column. `USER` is reserved: always write `[User]`.
+- **UserIdentity:** Id (`bigint`), UserId, Provider (Google / Email / Phone), ProviderSubject (Google subject id, normalized email, or E.164 phone), VerifiedUtc. Unique on (Provider, ProviderSubject) and on (UserId, Provider).
+- **LoginCode:** Id (`bigint`), Provider (Email / Phone), ProviderSubject, CodeHash, ExpiresUtc, AttemptCount, ConsumedUtc, CreatedUtc. Index on (Provider, ProviderSubject).
+- **RefreshToken:** Id (`bigint`), UserId, ClientId (FK `Client`), TokenHash (unique), ExpiresUtc, RevokedUtc, CreatedUtc. Index on UserId. Step 4 adds what rotation needs (for example `ReplacedByTokenId`) in a new migration.
+
+Enum-like columns are `varchar` with a `CHECK` constraint. Migrations in `database/migrations` are numbered and forward-only (never edit an applied one); `database/seed` is idempotent and runs on every deploy; `database/schema.sql` is the readable full reference.
+
+---
+
+## 6. API
+
+All routes `/api/v1`, JSON, `ProblemDetails` on errors.
+
+- `POST /auth/code/request` — body `{ clientId, email }`. Always `202 Accepted` with the same body, known address or not.
+- `POST /auth/code/verify` — body `{ clientId, email, code }` → `{ accessToken, accessTokenExpiresUtc, refreshToken, refreshTokenExpiresUtc, isNewUser }`.
+- `POST /auth/google` — body `{ clientId, idToken }` → same response.
+- `POST /auth/refresh` — body `{ clientId, refreshToken }` → new token pair (rotation).
+- `POST /auth/logout` — body `{ refreshToken }` → revokes it.
+- `GET /profile`, `PUT /profile` (display name), with a token — the display name and the sign-in methods on the account (email, Google; phone shown as "coming soon"). Changing the email means verifying the new address with a code before it replaces the old one.
+- `GET /.well-known/jwks.json`, `GET /.well-known/openid-configuration` (no `/api/v1` prefix; anonymous; cacheable).
+
+---
+
+## 7. Testing
+
+- **Stack:** xUnit v3, NSubstitute, Shouldly; Microsoft Testing Platform (`dotnet test --solution JTAuth.sln`).
+- **Unit tests:** code rules (expiry, single use, attempt limit, a new code invalidating the old one, rate limiting, identical response for known and unknown addresses); email normalization so one address cannot create two accounts; Google identity linking to an existing email account; token issuing and expiry; the audience matching the requesting client, and an unknown or disabled client refused; refresh rotation and reuse detection; the handler decorators (BuildingBlocks); database script checks (numbering, embedding, `schema.sql` complete, no password column).
+- **Integration tests:** the Dapper repositories against a real SQL Server in a throwaway database — the server named by `JTAUTH_TEST_SQLSERVER` (for example `localhost\SQLEXPRESS`) or a Testcontainers SQL Server; skipped, not failed, when neither is available.
+- **Architecture tests:** Domain and Application never reference Infrastructure, Dapper, ASP.NET or Azure SDKs; Contracts are DTOs only; no mediator library; **no reference to any app** (JTAuth never depends on CityBars or any other app).
+- **End-to-end check:** a token issued for `citybars` validates with stock `AddJwtBearer` configured with the JWKS URL and audience `citybars`, and fails with any other audience.
+
+---
+
+## 8. Build order
+
+Work through these steps in order; each must be runnable and verifiable before the next. Steps 1 and 2 are complete. Start the next session at Step 3.
+
+1. **Solution skeleton. DONE.** The layout from Section 3, `JTAuth.BuildingBlocks` copied from CityBars, placeholder Contracts, the API host with health checks, and the three test projects.
+   *Done when:* `dotnet build JTAuth.sln` is clean and the tests pass. Already true. Do not redo this step.
+
+2. **Database and client seed. DONE.** The migrations, `schema.sql` and seed from Section 5 (the `Client`, `[User]`, `UserIdentity`, `LoginCode` and `RefreshToken` tables; the `citybars` client), the DbUp migrator and `deploy-db.ps1`.
+   *Done when:* `deploy-db.ps1 -Environment local` produces the `JTAuth` database with the `citybars` client, and a second run changes nothing. Already true. Do not redo this step.
+
+3. **Email-code sign-in and tokens.** Code request and verify with every rule in Section 4.1 (codes written to the log in Development), account creation, access-token issuing with the signing key, `/.well-known/jwks.json` and `openid-configuration`, client checks, repositories, tests.
+   *Done when:* you can request a code for `citybars`, read it from the log, verify it to create an account, sign in again the same way, and the returned JWT validates against the published keys with audience `citybars` (and fails with any other audience).
+
+4. **Refresh, logout and profile.** Refresh-token rotation with reuse detection, logout, `GET/PUT /profile` (display name, sign-in methods, verified email change).
+   *Done when:* a refresh returns a new pair and revokes the old token, reusing a revoked token revokes the chain, and a display-name change shows up in the next access token's `name` claim.
+
+5. **Google Sign-In.** Validate Google ID tokens, create or link accounts (Section 4.1 linking rule).
+   *Done when:* a Google sign-in creates an account, and a Google sign-in with the verified email of an existing email account signs in to that same account.
+
+6. **Azure and docs.** Azure Communication Services Email sender, Key Vault signing key, Bicep and `provision-azure.ps1`, `run-local.ps1`, `docs/architecture.md`, README.
+   *Done when:* JTAuth runs in Azure, sends real code emails, and a fresh clone runs locally following only the README.
+
+---
+
+## 9. Out of scope (phase one)
+
+Passwords of any kind, phone (text-message) sign-in (designed in, not built), per-app access restrictions (`AccessMode` / `UserClient`, designed in, not built), any app's permissions or data, social providers other than Google, an admin UI, full OpenID Connect provider features (authorization code flow, consent screens, third-party clients).

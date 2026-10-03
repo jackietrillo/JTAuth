@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="dbup-sqlserver" />
+  </ItemGroup>
+
+  <!-- The SQL lives in database/migrations and database/seed; it is embedded here under stable names
+       ('migrations/0001_identity.sql'), which DbUp records in dbo.SchemaVersions. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\migrations\*.sql" LogicalName="migrations/%(Filename)%(Extension)" Link="migrations\%(Filename)%(Extension)" />
+    <EmbeddedResource Include="..\seed\*.sql" LogicalName="seed/%(Filename)%(Extension)" Link="seed\%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>

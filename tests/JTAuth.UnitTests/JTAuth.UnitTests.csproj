@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.Logging" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="NSubstitute" />
+    <PackageReference Include="Shouldly" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="xunit.v3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\database\JTAuth.Database\JTAuth.Database.csproj" />
+    <ProjectReference Include="..\..\JTAuth.BuildingBlocks\JTAuth.BuildingBlocks.csproj" />
+    <ProjectReference Include="..\..\JTAuth.Application\JTAuth.Application.csproj" />
+  </ItemGroup>
+
+</Project>

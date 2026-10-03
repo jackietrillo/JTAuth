@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\JTAuth.Domain\JTAuth.Domain.csproj" />
+    <ProjectReference Include="..\JTAuth.BuildingBlocks\JTAuth.BuildingBlocks.csproj" />
+    <ProjectReference Include="..\JTAuth.Contracts\JTAuth.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>
