@@ -32,6 +32,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 		README.md = README.md
 		jtauth-agent-prompt.md = jtauth-agent-prompt.md
 		docs\architecture.md = docs\architecture.md
+		docs\cost-and-infrastructure.md = docs\cost-and-infrastructure.md
 		database\schema.sql = database\schema.sql
 		scripts\deploy-db.ps1 = scripts\deploy-db.ps1
 	EndProjectSection

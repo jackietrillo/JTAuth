@@ -20,7 +20,7 @@ Build **JTAuth**, the shared, passwordless identity service for all of Jackie Tr
 - **Tokens:** JWTs signed with an asymmetric key (RS256 or ES256) using `Microsoft.IdentityModel.JsonWebTokens`; Google ID tokens validated with Google's published keys.
 - **Email:** Azure Communication Services Email in Azure; the log in Development.
 - **Scripting:** PowerShell (DB deploy, run, test, provisioning)
-- **Hosting (Azure):** Azure SQL, App Service or Container Apps for the API, Key Vault for the signing key and the Google OAuth client secret, Application Insights, managed identity wherever possible. Bicep, driven by PowerShell.
+- **Hosting (Azure), cost-first (Section 2c):** Azure SQL (serverless, auto-pause), App Service or Container Apps on the cheapest tier that works for the API, Key Vault for the signing key and the Google OAuth client secret, Application Insights with sampling and a daily cap, managed identity wherever possible. Bicep, driven by PowerShell, with a budget alert.
 
 ---
 
@@ -37,6 +37,12 @@ Build **JTAuth**, the shared, passwordless identity service for all of Jackie Tr
 
 - Local default: `Server=localhost;Database=JTAuth;Trusted_Connection=True;TrustServerCertificate=True;`. With a named instance (for example `localhost\SQLEXPRESS`), set the user environment variable `ConnectionStrings__JTAuthDb` once; the API and the scripts read it.
 - `scripts/deploy-db.ps1 -Environment local|azure` applies the same migrations either way; locally it creates the database if needed, on Azure the database comes from Bicep and sign-in uses Microsoft Entra ID.
+
+---
+
+## 2c. Cost rules
+
+**Cost is a requirement.** Azure is the expensive part of these apps; the code is free, so pick the cheapest option that does the job, and add a paid service only with its free allowance, its trigger for paying and a cap. The rules (Azure sizing, email cap, caching) and the monthly cost estimate live in **[docs/cost-and-infrastructure.md](docs/cost-and-infrastructure.md)**, which is binding for every step that touches Azure. In short: develop for free (nothing needs Azure until Step 6), prefer free tiers and scale-to-zero, and re-read current pricing before building each item. The same rules apply to every app of Jackie Trillo's (see the CityBars cost doc).
 
 ---
 

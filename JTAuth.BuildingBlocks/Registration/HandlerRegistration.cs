@@ -1,6 +1,7 @@
 using System.Reflection;
 using JTAuth.BuildingBlocks.Decorators;
 using JTAuth.BuildingBlocks.Handlers;
+using FluentValidation;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -43,8 +44,13 @@ public static class HandlerRegistration
 
         services.TryAddSingleton(TimeProvider.System);
 
-        var handlersByInterface = types
+        var concreteTypes = types
             .Where(type => type is { IsClass: true, IsAbstract: false, IsGenericTypeDefinition: false })
+            .ToList();
+
+        RegisterValidators(services, concreteTypes);
+
+        var handlersByInterface = concreteTypes
             .SelectMany(type => type.GetInterfaces()
                 .Where(IsHandlerInterface)
                 .Select(handlerInterface => (Interface: handlerInterface, Implementation: type)))
@@ -70,6 +76,22 @@ public static class HandlerRegistration
         }
 
         return services;
+    }
+
+    /// <summary>
+    /// Registers every FluentValidation validator found next to the handlers as <c>IValidator&lt;TRequest&gt;</c>,
+    /// so the validation decorator runs it. Without this a validator class would exist but never run.
+    /// </summary>
+    private static void RegisterValidators(IServiceCollection services, List<Type> concreteTypes)
+    {
+        foreach (var type in concreteTypes)
+        {
+            foreach (var validatorInterface in type.GetInterfaces()
+                         .Where(candidate => candidate.IsGenericType && candidate.GetGenericTypeDefinition() == typeof(IValidator<>)))
+            {
+                services.AddScoped(validatorInterface, type);
+            }
+        }
     }
 
     private static void Register(IServiceCollection services, Type handlerInterface, Type implementation)

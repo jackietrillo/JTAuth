@@ -1,0 +1,2 @@
+# Normalize line endings: the repository stores LF; Windows checkouts get CRLF (matches .editorconfig).
+* text=auto

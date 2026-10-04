@@ -102,6 +102,19 @@ public sealed class HandlerRegistrationTests
     }
 
     [Fact]
+    public async Task RegistersValidatorsFoundNextToTheHandlers()
+    {
+        await using var provider = BuildProvider(typeof(PingQueryHandler), typeof(PingQueryValidator));
+
+        provider.GetRequiredService<IValidator<PingQuery>>().ShouldBeOfType<PingQueryValidator>();
+
+        var result = await provider.GetRequiredService<IQueryHandler<PingQuery, string>>()
+            .HandleAsync(new PingQuery(""), TestContext.Current.CancellationToken);
+
+        result.Error!.Type.ShouldBe(ResultErrorType.Validation);
+    }
+
+    [Fact]
     public async Task RunsRegisteredValidatorAndSkipsHandlerOnFailure()
     {
         var services = new ServiceCollection();
