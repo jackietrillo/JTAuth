@@ -62,6 +62,63 @@ public sealed partial class DatabaseScriptTests
         }
     }
 
+    [Fact]
+    public void SchemaReferenceHasASectionForEveryMigration()
+    {
+        var reference = File.ReadAllText(Path.Combine(DatabaseFolder, "schema.sql"));
+
+        ScriptFiles("migrations")
+            .Where(file => !reference.Contains($"-- {file.Name}", StringComparison.Ordinal))
+            .Select(file => file.Name)
+            .ShouldBeEmpty("database/schema.sql has no section for these migrations.");
+    }
+
+    [Fact]
+    public void WhoHasUsedWhichAppIsRecordedOncePerPersonAndApp()
+    {
+        var migration = File.ReadAllText(ScriptFiles("migrations").Single(file => file.Name.EndsWith("_user_client.sql", StringComparison.Ordinal)).FullName);
+        var reference = File.ReadAllText(Path.Combine(DatabaseFolder, "schema.sql"));
+
+        foreach (var sql in new[] { migration, reference })
+        {
+            sql.ShouldContain("CREATE TABLE dbo.UserClient");
+            sql.ShouldContain("CONSTRAINT PK_UserClient PRIMARY KEY CLUSTERED (UserId, ClientId)");
+            sql.ShouldContain("FK_UserClient_User FOREIGN KEY (UserId) REFERENCES dbo.[User] (Id)");
+            sql.ShouldContain("FK_UserClient_Client FOREIGN KEY (ClientId) REFERENCES dbo.Client (Id)");
+        }
+    }
+
+    [Fact]
+    public void ConsentToBeContactedIsKeptPerAppAndCanBeWithdrawn()
+    {
+        var migration = File.ReadAllText(ScriptFiles("migrations").Single(file => file.Name.EndsWith("_user_client.sql", StringComparison.Ordinal)).FullName);
+
+        // It lives on the person-and-app row (so agreeing to one app says nothing about another) and is nullable (null = has not agreed).
+        migration.ShouldContain("ContactConsentUtc datetime2(3)     NULL");
+        migration.ShouldContain("WHERE ContactConsentUtc IS NOT NULL AND RevokedUtc IS NULL");
+    }
+
+    [Fact]
+    public void AnAppsServiceKeyIsStoredOnlyAsAHash()
+    {
+        var migration = File.ReadAllText(ScriptFiles("migrations").Single(file => file.Name.EndsWith("_user_client.sql", StringComparison.Ordinal)).FullName);
+
+        migration.ShouldContain("ADD ServiceKeyHash binary(32) NULL");
+        Regex.IsMatch(migration, @"\b(ServiceKey|ServiceSecret|ApiKey|Secret)\s+(n?varchar|varbinary|binary|char)", RegexOptions.IgnoreCase)
+            .ShouldBeFalse("only the hash of a service key may be stored");
+    }
+
+    [Fact]
+    public void TheUserTableHoldsNoContactDetailsOfItsOwn()
+    {
+        var identity = File.ReadAllText(ScriptFiles("migrations").First().FullName);
+        var user = Regex.Match(identity, @"CREATE TABLE dbo\.\[User\](?<body>.*?)\);", RegexOptions.Singleline).Groups["body"].Value;
+
+        user.ShouldNotBeEmpty();
+        user.ShouldNotContain("Email", Case.Insensitive);
+        user.ShouldNotContain("Phone", Case.Insensitive);
+    }
+
     [GeneratedRegex(@"^(\d{4})_[a-z0-9_]+\.sql$")]
     private static partial Regex NumberedScriptName();
 

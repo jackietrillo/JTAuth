@@ -14,6 +14,7 @@ public sealed class DependencyRuleTests
         "System.Data",
         "Azure",
         "Microsoft.Azure",
+        "Microsoft.IdentityModel",
     ];
 
     private static readonly string[] MediatorLibraries = ["MediatR", "Mediator", "Scrutor"];

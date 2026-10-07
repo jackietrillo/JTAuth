@@ -48,3 +48,4 @@ Everything runs locally; nothing needs Azure until **Step 6**. Development sign-
 |---|---|---|
 | 2026-10-03 | Tokens validated locally by apps from cached JWKS keys | JTAuth is not called per request |
 | 2026-10-03 | Sign-in codes only through email, with a daily send cap | Email spend bounded |
+| 2026-10-07 | Per-IP limits on code requests (5 a minute, 20 an hour) next to the per-address limits (1 a minute, 5 an hour) | One caller cannot make JTAuth send more than a few emails a minute, which bounds the email bill |

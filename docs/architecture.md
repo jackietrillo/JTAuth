@@ -7,7 +7,7 @@ Living document; the spec is [jtauth-agent-prompt.md](../jtauth-agent-prompt.md)
 ```
  CityBars Web ──(email + code, clientId=citybars)──►  JTAuth API ──► JTAuth database
       │                                                  │            (Client, [User], UserIdentity,
-      │◄──────── access token (aud=citybars) ────────────┘             LoginCode, RefreshToken)
+      │◄──────── access token (aud=citybars) ────────────┘             LoginCode, RefreshToken, UserClient)
       │
       └──(Bearer token)──► CityBars Bars Service ──(fetches /.well-known/jwks.json once, caches)──► JTAuth API
                                  │
@@ -18,6 +18,39 @@ Living document; the spec is [jtauth-agent-prompt.md](../jtauth-agent-prompt.md)
 - Apps never read the JTAuth database; they learn about a user only from the token.
 - What a user may do inside an app lives in that app's database.
 
+## Sign-in with an emailed code
+
+```
+App ─ POST /api/v1/auth/code/request {clientId, email} ─► RequestLoginCodeHandler ─► LoginCode (hash only) ─► IEmailSender
+App ─ POST /api/v1/auth/code/verify  {clientId, email, code} ─► VerifyLoginCodeHandler
+        client ok? ► latest code usable? ► attempt claimed? ► hash matches? ► code consumed?
+        ► person found or created ► UserClient upsert ► access token (aud = the client's Audience)
+```
+
+- **One handler per request** (`JTAuth.Application/SignIn`, `Keys`), injected by interface into thin controllers (`JTAuth.Api/Controllers`), decorated by `AddHandlers` (logging, timing, exception mapping, validation). `Result<T>` errors map to `ProblemDetails` in `ApiController`.
+- **The domain holds the rules** (`JTAuth.Domain`): `EmailAddress` (trim and lower-case, so one address is one identity), `LoginCodeRules` (6 digits, 10 minutes, 5 attempts, the keyed hash), `LoginCode` (`StateAt(now)` says usable, expired, used or out of attempts) and `TokenRules` (15-minute access tokens). Time always comes from `TimeProvider`.
+- **Codes.** The stored value is HMAC-SHA256 over provider, address and code, keyed with `JTAuth:CodeSecret`; the table never holds a code. A new code ends the older open ones (`ConsumedUtc` is set), and verification only ever looks at the newest code of an address.
+- **Attempts and single use are decided in SQL**, not in memory: `TryClaimAttemptAsync` increments `AttemptCount` only while the code is unused and below five, and is done *before* the digits are compared; `TryConsumeAsync` sets `ConsumedUtc` only if the code is unused and unexpired. Under any number of parallel callers exactly five guesses are counted and exactly one caller redeems a code (integration tests run both races).
+- **Same answer for known and unknown addresses.** The request handler never reads accounts. Verification answers every code failure with the same `401 invalid_code`. Only the app (unknown `400`, disabled `403`), the shape of the address (`400`) and the rate limits (`429`) differ, and none of them depends on whether an account exists.
+- **Rate limits.** Per address from the stored codes (1 a minute, 5 an hour, `JTAuth:CodeRequestsPerAddress...`), so they survive restarts and several instances. Per IP in the API (`RateLimits`): 120 requests a minute for any endpoint and 5 a minute / 20 an hour for code requests, chained in one global limiter. Behind a proxy the address seen is the proxy's until forwarded headers are configured for the host (Azure).
+- **Accounts.** `UserRepository.GetOrCreateByIdentityAsync` finds the person who owns an `(Provider, ProviderSubject)` identity or creates the `[User]` and `UserIdentity` rows in one transaction; if a parallel sign-in wins the unique key, the loser rolls back and returns the winner, so there are no duplicate or orphan people. `isNewUser` is true only for the caller that created the account, and the display name stays empty (no `name` claim) until the app asks for one.
+- **`UserClient`** is upserted at every successful sign-in with one `MERGE`: the first sign-in sets `FirstSignInUtc` and `LastSignInUtc`; later ones only move `LastSignInUtc` (never backwards); `ContactConsentUtc` and `RevokedUtc` are not mentioned by the statement. Open clients ignore the row when deciding who may sign in.
+- **Timestamps** are sent to SQL as `datetime2` (`JTAuthDatabase` registers the Dapper type map), so a value reads back exactly as written.
+
+## Tokens and published keys
+
+- `AccessTokenIssuer` (Infrastructure) signs RS256 JWTs with `iss` (`JTAuth:Issuer`), `aud` (the requesting client's `Audience`), `sub` (user id), `name` (only when set), `iat`, `nbf`, `exp` (15 minutes) and a unique `jti`; the header carries `kid`.
+- `RsaSigningKeys` loads (or on first run creates) a 2048-bit RSA key from a file outside the repository, `%LOCALAPPDATA%\JTAuth\signing-key.json` by default (`JTAuth:SigningKeyFile`; required outside Development). The `kid` is the SHA-256 of the public key. `PublishedKeys` is a list so rotation (publish the new key before signing with it) needs no change to the endpoints; Key Vault and rotation come with the Azure work.
+- `GET /.well-known/jwks.json` publishes only `kty`, `use`, `alg`, `kid`, `n`, `e`; `GET /.well-known/openid-configuration` publishes the issuer and the JWKS URL. Both are anonymous with `Cache-Control: public, max-age=3600`.
+- An app validates with stock `AddJwtBearer` (`Authority` = JTAuth's issuer, `Audience` = its own). Set `MapInboundClaims = false` to read `sub` and `name` under their own names. The end-to-end test does exactly this, one scheme per audience, and a token for `citybars` is refused by the other audience.
+- **Email.** `IEmailSender` is in Application. Development registers `LoggingEmailSender`, which writes the message (code included) to the log. Any other environment refuses to start until a real sender is registered.
+
+## Running and testing
+
+- Local: `./scripts/deploy-db.ps1 -Environment local -Server 'localhost\SQLEXPRESS'`, set `ConnectionStrings__JTAuthDb` for the named instance, then `dotnet run --project JTAuth.Api` (https://localhost:7200). Development settings supply the issuer and a development-only `JTAuth:CodeSecret`.
+- `./scripts/run-tests.ps1` runs the unit and architecture test projects directly (`dotnet test` reports "Zero tests ran" on this SDK); `-IncludeIntegration -Server 'localhost\SQLEXPRESS'` (or `JTAUTH_TEST_SQLSERVER`) adds the integration tests, which deploy the real migrations and seed into a throwaway database, or skip when no SQL Server (and no Docker) is available.
+- Unit tests use in-memory repositories that follow the SQL rules, so whole sign-in flows run without a database; the integration tests prove the SQL itself, including both races, and start the API in memory for the end-to-end checks.
+
 ## Decisions (ADRs)
 
 | # | Decision | Why |
@@ -26,3 +59,8 @@ Living document; the spec is [jtauth-agent-prompt.md](../jtauth-agent-prompt.md)
 | 2 | Separate repository and database, named `JTAuth` | One account across all of Jackie Trillo's apps; the umbrella prefix keeps app names out of shared infrastructure. |
 | 3 | `JTAuth.BuildingBlocks` copied from CityBars | About 300 lines; a NuGet package is worth it only when a third repository needs it. |
 | 4 | Registered clients in a `Client` table with per-client audience | Each app's tokens are rejected by every other app; sign-in emails name the right app. |
+| 5 | Codes are stored as a keyed HMAC, and attempts are claimed in SQL before the comparison | A million possible codes fall to a plain hash if the table leaks; claiming first and atomically keeps parallel guessing to five attempts, and a conditional `UPDATE` makes a code single use without locks. |
+| 6 | Per-address code limits are counted from the stored codes; per-IP limits live in the API | The address limit then holds across restarts and instances and needs no cache. Addresses of callers are not stored. |
+| 7 | RS256 with a key file outside the repository | Every JWT library validates RS256 from a JWKS; the file is generated on first run and never committed, and Key Vault replaces it in Azure. |
+| 8 | `UserClient` is written with one `MERGE` that mentions only the sign-in times | Consent and revocation belong to later features and must survive every sign-in; leaving them out of the statement guarantees it. |
+| 9 | Unit tests use in-memory repositories that mirror the SQL rules; SQL is proved by integration tests | Whole flows (five wrong attempts then the right code, replaced codes, rate limits) run in milliseconds, while the race conditions are tested where they actually happen. |

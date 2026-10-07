@@ -1,5 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
+  <PropertyGroup>
+    <!-- Swashbuckle's reflection-based generator exposes types through public API surface. -->
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Swashbuckle.AspNetCore" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\JTAuth.Application\JTAuth.Application.csproj" />
     <ProjectReference Include="..\JTAuth.Infrastructure\JTAuth.Infrastructure.csproj" />

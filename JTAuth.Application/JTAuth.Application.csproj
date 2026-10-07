@@ -6,4 +6,8 @@
     <ProjectReference Include="..\JTAuth.Contracts\JTAuth.Contracts.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="JTAuth.UnitTests" />
+  </ItemGroup>
+
 </Project>
