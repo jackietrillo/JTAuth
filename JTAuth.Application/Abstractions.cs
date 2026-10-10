@@ -42,6 +42,15 @@ public interface IUserRepository
     /// </summary>
     Task<(User User, bool IsNew)> GetOrCreateByIdentityAsync(IdentityProvider provider, string providerSubject, DateTimeOffset now, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Finds or creates the person for a Google account, as one change that holds under concurrent calls:
+    /// the Google account already known signs in to its person; otherwise a person who already has this verified email address
+    /// (an Email identity) gains the Google identity and is the same account; otherwise a new person is created with both a Google
+    /// and an Email identity, so the same address cannot later start a second account. A person who already has a different Google
+    /// account linked is refused rather than given a second one.
+    /// </summary>
+    Task<GoogleSignInOutcome> GetOrCreateByGoogleAsync(string googleSubject, string email, string? displayName, DateTimeOffset now, CancellationToken cancellationToken);
+
     /// <summary>The person with this id, or null.</summary>
     Task<User?> FindByIdAsync(Guid userId, CancellationToken cancellationToken);
 
@@ -59,6 +68,36 @@ public interface IUserRepository
     /// Refused when the address already belongs to someone else.
     /// </summary>
     Task<EmailChangeResult> ChangeEmailAsync(Guid userId, string newEmail, DateTimeOffset now, CancellationToken cancellationToken);
+}
+
+public enum GoogleSignInStatus
+{
+    /// <summary>The Google account was already known.</summary>
+    SignedIn,
+
+    /// <summary>No account had this Google account or this email address, so one was created.</summary>
+    Created,
+
+    /// <summary>An account with this verified email address gained the Google identity and is the same account.</summary>
+    Linked,
+
+    /// <summary>The account with this email address already has a different Google account linked.</summary>
+    Conflict,
+}
+
+/// <summary>The result of a Google sign-in: the person (null only for <see cref="GoogleSignInStatus.Conflict"/>) and what happened.</summary>
+public sealed record GoogleSignInOutcome(User? User, GoogleSignInStatus Status);
+
+/// <summary>What Google vouches for in an ID token that passed every check: the Google account, and an email address Google has verified.</summary>
+public sealed record GoogleProfile(string Subject, string Email, string? Name);
+
+public interface IGoogleIdTokenValidator
+{
+    /// <summary>
+    /// The Google account in an ID token, or null for any token that is not acceptable: wrong signature, issuer or audience (it must have
+    /// been issued to one of this service's Google client ids), expired, or without a verified email address.
+    /// </summary>
+    Task<GoogleProfile?> ValidateAsync(string idToken, CancellationToken cancellationToken);
 }
 
 /// <summary>A sign-in identity as the person sees it: how they sign in, and the address or id behind it.</summary>

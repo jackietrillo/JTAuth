@@ -1,4 +1,5 @@
 using JTAuth.Application;
+using JTAuth.Infrastructure.Google;
 using JTAuth.Infrastructure.Tokens;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -24,6 +25,9 @@ public static class DependencyInjection
         services.AddSingleton(_ => RsaSigningKeys.LoadOrCreate(signingKeyFile));
         services.AddSingleton<ISigningKeySource>(provider => provider.GetRequiredService<RsaSigningKeys>());
         services.AddSingleton<IAccessTokenIssuer, AccessTokenIssuer>();
+
+        services.AddSingleton<IGoogleIdTokenValidator>(provider =>
+            new GoogleIdTokenValidator(provider.GetRequiredService<JTAuthSettings>(), GoogleIdTokenValidator.CreateGoogleConfigurationManager()));
         return services;
     }
 }

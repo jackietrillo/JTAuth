@@ -62,11 +62,6 @@ public sealed class VerifyLoginCodeHandler(
         var (user, isNew) = await users.GetOrCreateByIdentityAsync(IdentityProvider.Email, email, now, cancellationToken).ConfigureAwait(false);
         await userClients.RecordSignInAsync(user.Id, client.Id, now, cancellationToken).ConfigureAwait(false);
 
-        var (refreshToken, refreshHash) = RefreshTokenRules.Generate();
-        var chain = RefreshToken.StartChain(user.Id, client.Id, refreshHash, now);
-        await refreshTokens.AddAsync(chain, cancellationToken).ConfigureAwait(false);
-
-        var access = tokenIssuer.Issue(user, client, now);
-        return Result.Success(new AuthTokensDto(access.Token, access.ExpiresUtc, refreshToken, chain.ExpiresUtc, isNew));
+        return Result.Success(await SessionIssuer.StartAsync(refreshTokens, tokenIssuer, user, client, isNew, now, cancellationToken).ConfigureAwait(false));
     }
 }

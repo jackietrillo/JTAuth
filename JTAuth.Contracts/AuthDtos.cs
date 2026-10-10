@@ -24,6 +24,9 @@ public sealed record AuthTokensDto(
     DateTimeOffset RefreshTokenExpiresUtc,
     bool IsNewUser);
 
+/// <summary>Signs in with the ID token Google gave the app's page after the person chose their Google account.</summary>
+public sealed record GoogleSignInRequest(string ClientId, string IdToken);
+
 /// <summary>Exchanges a refresh token for a new access token and a new refresh token. The old refresh token stops working.</summary>
 public sealed record RefreshRequest(string ClientId, string RefreshToken);
 

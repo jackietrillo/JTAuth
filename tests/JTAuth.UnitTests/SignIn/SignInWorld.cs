@@ -108,6 +108,31 @@ internal sealed class InMemoryUsers : IUserRepository
         return Task.FromResult((created, true));
     }
 
+    public Task<GoogleSignInOutcome> GetOrCreateByGoogleAsync(string googleSubject, string email, string? displayName, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        if (identities.TryGetValue((IdentityProvider.Google, googleSubject), out var known))
+        {
+            return Task.FromResult(new GoogleSignInOutcome(users[known], GoogleSignInStatus.SignedIn));
+        }
+
+        if (identities.TryGetValue((IdentityProvider.Email, email), out var owner))
+        {
+            if (identities.Any(pair => pair.Value == owner && pair.Key.Item1 == IdentityProvider.Google))
+            {
+                return Task.FromResult(new GoogleSignInOutcome(null, GoogleSignInStatus.Conflict));
+            }
+
+            identities[(IdentityProvider.Google, googleSubject)] = owner;
+            return Task.FromResult(new GoogleSignInOutcome(users[owner], GoogleSignInStatus.Linked));
+        }
+
+        var created = new User(Guid.NewGuid(), displayName, now);
+        users[created.Id] = created;
+        identities[(IdentityProvider.Google, googleSubject)] = created.Id;
+        identities[(IdentityProvider.Email, email)] = created.Id;
+        return Task.FromResult(new GoogleSignInOutcome(created, GoogleSignInStatus.Created));
+    }
+
     public Task<User?> FindByIdAsync(Guid userId, CancellationToken cancellationToken) =>
         Task.FromResult(users.TryGetValue(userId, out var user) ? user : null);
 
@@ -243,6 +268,26 @@ internal sealed class RecordingTokenIssuer : IAccessTokenIssuer
     }
 }
 
+/// <summary>Accepts the ID tokens a test has registered, and refuses every other one.</summary>
+internal sealed class FakeGoogle : IGoogleIdTokenValidator
+{
+    private readonly Dictionary<string, GoogleProfile> accepted = [];
+
+    public int Calls { get; private set; }
+
+    public string Accept(string token, string subject, string email, string? name = null)
+    {
+        accepted[token] = new GoogleProfile(subject, email, name);
+        return token;
+    }
+
+    public Task<GoogleProfile?> ValidateAsync(string idToken, CancellationToken cancellationToken)
+    {
+        Calls++;
+        return Task.FromResult(accepted.TryGetValue(idToken, out var profile) ? profile : null);
+    }
+}
+
 /// <summary>The sign-in, refresh and profile handlers wired to in-memory stand-ins, with a clock the test controls.</summary>
 internal sealed class SignInWorld
 {
@@ -251,6 +296,7 @@ internal sealed class SignInWorld
         Clock = new TestClock(new DateTimeOffset(2026, 10, 7, 12, 0, 0, TimeSpan.Zero));
         Request = new RequestLoginCodeHandler(Clients, Codes, Email, Settings, Clock);
         Verify = new VerifyLoginCodeHandler(Clients, Codes, Users, UserClients, RefreshTokens, Tokens, Settings, Clock);
+        SignInWithGoogle = new SignInWithGoogleHandler(Clients, Google, Users, UserClients, RefreshTokens, Tokens, Settings, Clock);
         Refresh = new RefreshTokensHandler(Clients, RefreshTokens, Users, Tokens, Clock);
         Logout = new LogoutHandler(RefreshTokens, Clock);
         GetProfile = new GetProfileHandler(Users);
@@ -261,7 +307,11 @@ internal sealed class SignInWorld
 
     public TestClock Clock { get; }
 
-    public JTAuthSettings Settings { get; } = new() { Issuer = "https://auth.test", CodeSecret = "test-secret" };
+    public JTAuthSettings Settings { get; } = new() { Issuer = "https://auth.test", CodeSecret = "test-secret", GoogleClientIds = ["google-client-id"] };
+
+    public FakeGoogle Google { get; } = new();
+
+    public SignInWithGoogleHandler SignInWithGoogle { get; }
 
     public InMemoryClients Clients { get; } = new();
 
@@ -312,6 +362,9 @@ internal sealed class SignInWorld
         Clock.Advance(TimeSpan.FromMinutes(2));
         return result.Value!;
     }
+
+    public Task<Result<AuthTokensDto>> GoogleAsync(string idToken, string clientId = "citybars") =>
+        SignInWithGoogle.HandleAsync(new SignInWithGoogleCommand(clientId, idToken), CancellationToken.None);
 
     public Task<Result<AuthTokensDto>> RefreshAsync(string refreshToken, string clientId = "citybars") =>
         Refresh.HandleAsync(new RefreshTokensCommand(clientId, refreshToken), CancellationToken.None);

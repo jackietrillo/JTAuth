@@ -13,6 +13,7 @@ namespace JTAuth.Api.Controllers;
 public sealed class AuthController(
     ICommandHandler<RequestLoginCodeCommand, CodeRequestedDto> requestCode,
     ICommandHandler<VerifyLoginCodeCommand, AuthTokensDto> verifyCode,
+    ICommandHandler<SignInWithGoogleCommand, AuthTokensDto> signInWithGoogle,
     ICommandHandler<RefreshTokensCommand, AuthTokensDto> refresh,
     ICommandHandler<LogoutCommand, Unit> logout) : ApiController
 {
@@ -30,6 +31,17 @@ public sealed class AuthController(
     {
         ArgumentNullException.ThrowIfNull(request);
         return Respond(await verifyCode.HandleAsync(new VerifyLoginCodeCommand(request.ClientId, request.Email, request.Code), cancellationToken));
+    }
+
+    /// <summary>
+    /// Signs in with a Google ID token. The account is created, or linked to the account that already has the same verified email
+    /// address, and the response is the same as for a code sign-in. 404 when no Google client id is configured.
+    /// </summary>
+    [HttpPost("google")]
+    public async Task<ActionResult<AuthTokensDto>> Google(GoogleSignInRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return Respond(await signInWithGoogle.HandleAsync(new SignInWithGoogleCommand(request.ClientId, request.IdToken), cancellationToken));
     }
 
     /// <summary>Swaps a refresh token for a new access token and a new refresh token. The presented refresh token stops working.</summary>

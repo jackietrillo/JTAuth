@@ -11,6 +11,15 @@ public sealed class JTAuthSettings
     /// <summary>The server secret that keys the hash codes are stored under. Never committed, never logged.</summary>
     public string CodeSecret { get; set; } = string.Empty;
 
+    /// <summary>
+    /// The Google OAuth client ids whose ID tokens are accepted (a Google token names the client it was issued for). Several are
+    /// normal: one per environment and one per platform. Empty means Google sign-in is not offered.
+    /// </summary>
+    public string[] GoogleClientIds { get; set; } = [];
+
+    /// <summary>The configured Google client ids without blank entries, which would otherwise match a token that names no audience.</summary>
+    public IReadOnlyList<string> UsableGoogleClientIds => GoogleClientIds.Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => id.Trim()).ToList();
+
     /// <summary>At most this many codes per email address in any one minute.</summary>
     public int CodeRequestsPerAddressPerMinute { get; set; } = 1;
 

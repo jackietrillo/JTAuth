@@ -47,6 +47,82 @@ public sealed class UserRepository(JTAuthDatabase database) : IUserRepository
         }
     }
 
+    public async Task<GoogleSignInOutcome> GetOrCreateByGoogleAsync(
+        string googleSubject, string email, string? displayName, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        await using var connection = await database.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+        // Two sign-ins can race to create the same person (the same Google account, or the same email address from a code sign-in).
+        // The unique keys make the loser fail; trying again then finds the person the winner made.
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            try
+            {
+                return await TryGetOrCreateByGoogleAsync(connection, googleSubject, email, displayName, now, cancellationToken).ConfigureAwait(false);
+            }
+            catch (SqlException exception) when (exception.Number is UniqueConstraintViolation or UniqueIndexViolation)
+            {
+                // Look again from the start.
+            }
+        }
+
+        throw new InvalidOperationException("The Google account could not be signed in because of repeated conflicting changes.");
+    }
+
+    private static async Task<GoogleSignInOutcome> TryGetOrCreateByGoogleAsync(
+        SqlConnection connection, string googleSubject, string email, string? displayName, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        if (await FindAsync(connection, IdentityProvider.Google, googleSubject, cancellationToken, transaction).ConfigureAwait(false) is { } known)
+        {
+            return new GoogleSignInOutcome(known, GoogleSignInStatus.SignedIn);
+        }
+
+        var ownerId = await connection.ExecuteScalarAsync<Guid?>(new CommandDefinition(
+            "SELECT UserId FROM dbo.UserIdentity WHERE Provider = 'Email' AND ProviderSubject = @email;",
+            new { email }, transaction, cancellationToken: cancellationToken)).ConfigureAwait(false);
+
+        if (ownerId is { } owner)
+        {
+            var hasGoogle = await connection.ExecuteScalarAsync<bool>(new CommandDefinition(
+                "SELECT CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.UserIdentity WHERE UserId = @owner AND Provider = 'Google') THEN 1 ELSE 0 END AS bit);",
+                new { owner }, transaction, cancellationToken: cancellationToken)).ConfigureAwait(false);
+            if (hasGoogle)
+            {
+                return new GoogleSignInOutcome(null, GoogleSignInStatus.Conflict);
+            }
+
+            await connection.ExecuteAsync(new CommandDefinition(
+                "INSERT dbo.UserIdentity (UserId, Provider, ProviderSubject, VerifiedUtc) VALUES (@owner, 'Google', @googleSubject, @now);",
+                new { owner, googleSubject, now = SqlTime.ToSql(now) }, transaction, cancellationToken: cancellationToken)).ConfigureAwait(false);
+
+            var linked = await connection.QuerySingleAsync<UserRow>(new CommandDefinition(
+                "SELECT Id, DisplayName, CreatedUtc FROM dbo.[User] WHERE Id = @owner;",
+                new { owner }, transaction, cancellationToken: cancellationToken)).ConfigureAwait(false);
+
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return new GoogleSignInOutcome(new User(linked.Id, linked.DisplayName, SqlTime.FromSql(linked.CreatedUtc)), GoogleSignInStatus.Linked);
+        }
+
+        // A new person gets both identities: the Google account, and the email address Google has verified, so a later sign-in with
+        // a code for the same address reaches this account and no second account can be made for it.
+        var id = await connection.ExecuteScalarAsync<Guid>(new CommandDefinition(
+            """
+            DECLARE @created TABLE (Id uniqueidentifier);
+            INSERT dbo.[User] (DisplayName, CreatedUtc) OUTPUT inserted.Id INTO @created VALUES (@displayName, @now);
+            INSERT dbo.UserIdentity (UserId, Provider, ProviderSubject, VerifiedUtc)
+                SELECT Id, 'Google', @googleSubject, @now FROM @created;
+            INSERT dbo.UserIdentity (UserId, Provider, ProviderSubject, VerifiedUtc)
+                SELECT Id, 'Email', @email, @now FROM @created;
+            SELECT Id FROM @created;
+            """,
+            new { displayName, googleSubject, email, now = SqlTime.ToSql(now) }, transaction, cancellationToken: cancellationToken)).ConfigureAwait(false);
+
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return new GoogleSignInOutcome(new User(id, displayName, now), GoogleSignInStatus.Created);
+    }
+
     public async Task<User?> FindByIdAsync(Guid userId, CancellationToken cancellationToken)
     {
         await using var connection = await database.OpenAsync(cancellationToken).ConfigureAwait(false);
@@ -121,7 +197,8 @@ public sealed class UserRepository(JTAuthDatabase database) : IUserRepository
         }
     }
 
-    private static async Task<User?> FindAsync(SqlConnection connection, IdentityProvider provider, string providerSubject, CancellationToken cancellationToken)
+    private static async Task<User?> FindAsync(
+        SqlConnection connection, IdentityProvider provider, string providerSubject, CancellationToken cancellationToken, SqlTransaction? transaction = null)
     {
         var row = await connection.QuerySingleOrDefaultAsync<UserRow>(new CommandDefinition(
             """
@@ -130,7 +207,7 @@ public sealed class UserRepository(JTAuthDatabase database) : IUserRepository
             JOIN dbo.[User] u ON u.Id = i.UserId
             WHERE i.Provider = @provider AND i.ProviderSubject = @providerSubject;
             """,
-            new { provider = provider.ToString(), providerSubject }, cancellationToken: cancellationToken)).ConfigureAwait(false);
+            new { provider = provider.ToString(), providerSubject }, transaction, cancellationToken: cancellationToken)).ConfigureAwait(false);
 
         return row is null ? null : new User(row.Id, row.DisplayName, SqlTime.FromSql(row.CreatedUtc));
     }

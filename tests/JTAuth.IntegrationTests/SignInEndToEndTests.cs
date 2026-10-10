@@ -46,6 +46,8 @@ public sealed class JTAuthApi : WebApplicationFactory<Program>
 
     public CapturingEmailSender Emails { get; } = new();
 
+    public FakeGoogleIdTokens Google { get; } = new();
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         ArgumentNullException.ThrowIfNull(builder);
@@ -60,6 +62,8 @@ public sealed class JTAuthApi : WebApplicationFactory<Program>
         {
             services.RemoveAll<IEmailSender>();
             services.AddSingleton<IEmailSender>(Emails);
+            services.RemoveAll<IGoogleIdTokenValidator>();
+            services.AddSingleton<IGoogleIdTokenValidator>(Google);
             if (remoteAddress is not null)
             {
                 services.AddSingleton<IStartupFilter>(new RemoteAddressFilter(remoteAddress));
@@ -80,6 +84,32 @@ internal sealed class RemoteAddressFilter(IPAddress address) : IStartupFilter
         });
         next(app);
     };
+}
+
+/// <summary>Stands in for Google (which a test cannot reach): accepts the ID tokens a test registers and refuses every other one.</summary>
+public sealed class FakeGoogleIdTokens : IGoogleIdTokenValidator
+{
+    private readonly Dictionary<string, GoogleProfile> accepted = [];
+
+    /// <summary>Registers a token Google would vouch for, and returns it.</summary>
+    public string Accept(string subject, string email, string? name = null)
+    {
+        var token = "google-id-token-" + Guid.NewGuid().ToString("N");
+        lock (accepted)
+        {
+            accepted[token] = new GoogleProfile(subject, email, name);
+        }
+
+        return token;
+    }
+
+    public Task<GoogleProfile?> ValidateAsync(string idToken, CancellationToken cancellationToken)
+    {
+        lock (accepted)
+        {
+            return Task.FromResult(accepted.TryGetValue(idToken, out var profile) ? profile : null);
+        }
+    }
 }
 
 public sealed class CapturingEmailSender : IEmailSender

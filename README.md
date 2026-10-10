@@ -4,11 +4,12 @@ The shared, passwordless sign-in service for all of Jackie Trillo's apps (CityBa
 
 ## Status
 
-Steps 1 (solution skeleton), 2 (database and client seed), 3 (email-code sign-in and access tokens) and 4 (refresh, logout and profile) are complete. The API signs people in with an emailed one-time code, creates the account on a first sign-in, and issues 15-minute RS256 access tokens that apps validate with stock `AddJwtBearer` against `/.well-known/jwks.json`, plus single-use refresh tokens (30 days, rotated on every use, reuse ends the chain). A signed-in person can read and change their display name and change their sign-in email. In Development the code is written to the log. Google sign-in is the next step.
+Steps 1 (solution skeleton), 2 (database and client seed), 3 (email-code sign-in and access tokens) and 4 (refresh, logout and profile) are complete. The API signs people in with an emailed one-time code, creates the account on a first sign-in, and issues 15-minute RS256 access tokens that apps validate with stock `AddJwtBearer` against `/.well-known/jwks.json`, plus single-use refresh tokens (30 days, rotated on every use, reuse ends the chain). A signed-in person can read and change their display name and change their sign-in email. In Development the code is written to the log. Google Sign-In works too: a Google ID token from the app's page is validated against Google's keys, and the account is created, or linked to the account that already has the same verified email.
 
 | Endpoint | What it does |
 |---|---|
 | `POST /api/v1/auth/code/request`, `/code/verify` | Email-code sign-in (signing up and signing in are the same flow) |
+| `POST /api/v1/auth/google` | Sign in (or up) with a Google ID token; 404 when no Google client id is configured |
 | `POST /api/v1/auth/refresh`, `/logout` | Swap a refresh token for a new pair; end the session |
 | `GET`/`PUT /api/v1/profile` | Display name and sign-in methods (access token required) |
 | `POST /api/v1/profile/email/request-code`, `/email/verify` | Change the sign-in email with a code sent to the new address |
@@ -56,6 +57,8 @@ curl.exe -X POST https://localhost:7200/api/v1/auth/code/request -H "Content-Typ
 # the code is in the API's console log: "Your CityBars code is 123456"
 curl.exe -X POST https://localhost:7200/api/v1/auth/code/verify -H "Content-Type: application/json" -d '{"clientId":"citybars","email":"you@example.com","code":"123456"}'
 ```
+
+**Google Sign-In:** in the Google Cloud console create an OAuth client of type *Web application* (consent screen in Testing mode with your own account as a test user, authorized JavaScript origin `http://localhost:5100`) and put its **client id** (it ends in `.apps.googleusercontent.com`) in `JTAuth:GoogleClientIds`. Only the id is needed: never the client secret, and never commit the downloaded JSON file. Add one id per environment and per phone platform later.
 
 Settings (`JTAuth` section): `Issuer` (the API's public URL), `CodeSecret` (keys the stored code hashes), `SigningKeyFile` (defaults in Development to `%LOCALAPPDATA%\JTAuth\signing-key.json`, generated on first run and never committed), and the per-address code limits. `RateLimits` holds the per-IP limits. Outside Development the API refuses to start until a real email sender is registered.
 
