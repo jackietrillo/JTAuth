@@ -1,9 +1,11 @@
+using System.Net;
 using JTAuth.Api;
 using JTAuth.Application;
 using JTAuth.BuildingBlocks.Registration;
 using JTAuth.Infrastructure;
 using JTAuth.Infrastructure.Email;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.OpenApi;
 
@@ -57,6 +59,25 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
     options.SwaggerDoc("v1", new OpenApiInfo { Title = "JTAuth API", Version = "v1" }));
 
+// An app's web server calls JTAuth for its visitors and passes each visitor's address in X-Forwarded-For. That header is believed only
+// from loopback, RateLimits:TrustedProxies, or any caller when RateLimits:TrustAnyProxy is set (private network only), so the
+// per-address limits below count visitors and not the web server.
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor;
+    options.ForwardLimit = 1;
+    if (rateLimits.TrustAnyProxy)
+    {
+        options.KnownIPNetworks.Clear();
+        options.KnownProxies.Clear();
+    }
+
+    foreach (var proxy in rateLimits.TrustedProxies)
+    {
+        options.KnownProxies.Add(IPAddress.Parse(proxy));
+    }
+});
+
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -78,6 +99,7 @@ builder.Services.AddHealthChecks().AddCheck<DatabaseHealthCheck>("database");
 
 var app = builder.Build();
 
+app.UseForwardedHeaders();
 app.UseExceptionHandler();
 app.UseRateLimiter();
 app.UseAuthentication();

@@ -15,6 +15,15 @@ public sealed class RateLimitSettings
 
     /// <summary>Sign-in code requests per client address per hour.</summary>
     public int CodeRequestsPerHourPerIp { get; set; } = 20;
+
+    /// <summary>
+    /// Addresses of proxies whose <c>X-Forwarded-For</c> header is believed (the loopback addresses always are). An app's web server
+    /// that calls JTAuth for its visitors is such a proxy: without it every visitor would share that server's address and its limits.
+    /// </summary>
+    public string[] TrustedProxies { get; set; } = [];
+
+    /// <summary>Believe <c>X-Forwarded-For</c> from any caller. Only for a deployment where JTAuth is reachable from trusted servers alone.</summary>
+    public bool TrustAnyProxy { get; set; }
 }
 
 internal static class RateLimiting

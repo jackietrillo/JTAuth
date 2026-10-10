@@ -21,9 +21,12 @@ namespace JTAuth.IntegrationTests;
 public sealed class JTAuthApi : WebApplicationFactory<Program>
 {
     private readonly Dictionary<string, string> settings;
+    private readonly IPAddress? remoteAddress;
 
-    public JTAuthApi(string connectionString, string signingKeyFile, Dictionary<string, string>? overrides = null)
+    /// <param name="remoteAddress">The address callers appear to come from. In-memory calls come from loopback, which is a trusted proxy.</param>
+    public JTAuthApi(string connectionString, string signingKeyFile, Dictionary<string, string>? overrides = null, string? remoteAddress = null)
     {
+        this.remoteAddress = remoteAddress is null ? null : IPAddress.Parse(remoteAddress);
         settings = new Dictionary<string, string>
         {
             ["ConnectionStrings:JTAuthDb"] = connectionString,
@@ -57,8 +60,26 @@ public sealed class JTAuthApi : WebApplicationFactory<Program>
         {
             services.RemoveAll<IEmailSender>();
             services.AddSingleton<IEmailSender>(Emails);
+            if (remoteAddress is not null)
+            {
+                services.AddSingleton<IStartupFilter>(new RemoteAddressFilter(remoteAddress));
+            }
         });
     }
+}
+
+/// <summary>Makes every call appear to come from one address, ahead of the rest of the pipeline.</summary>
+internal sealed class RemoteAddressFilter(IPAddress address) : IStartupFilter
+{
+    public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
+    {
+        app.Use((context, nextMiddleware) =>
+        {
+            context.Connection.RemoteIpAddress = address;
+            return nextMiddleware(context);
+        });
+        next(app);
+    };
 }
 
 public sealed class CapturingEmailSender : IEmailSender
@@ -401,5 +422,78 @@ public sealed class SignInEndToEndTests(SqlServerDatabase database) : IDisposabl
         third.StatusCode.ShouldBe(HttpStatusCode.TooManyRequests);
         third.Headers.RetryAfter.ShouldNotBeNull();
         api.Emails.Sent.Count.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task AnAppsWebServerCanPassOnEachVisitorsAddressSoVisitorsAreLimitedSeparately()
+    {
+        database.SkipIfUnavailable();
+        using var api = new JTAuthApi(database.ConnectionString, keyFile, new Dictionary<string, string>
+        {
+            ["RateLimits:CodeRequestsPerMinutePerIp"] = "2",
+            ["RateLimits:TrustAnyProxy"] = "true",
+        });
+        using var jtauth = api.CreateClient();
+
+        async Task<HttpStatusCode> RequestAs(string visitorAddress)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/auth/code/request") { Content = JsonContent.Create(new RequestCodeRequest("citybars", NewAddress())) };
+            request.Headers.Add("X-Forwarded-For", visitorAddress);
+            using var response = await jtauth.SendAsync(request, Cancel);
+            return response.StatusCode;
+        }
+
+        (await RequestAs("203.0.113.5")).ShouldBe(HttpStatusCode.Accepted);
+        (await RequestAs("203.0.113.5")).ShouldBe(HttpStatusCode.Accepted);
+        (await RequestAs("203.0.113.5")).ShouldBe(HttpStatusCode.TooManyRequests);
+        (await RequestAs("203.0.113.6")).ShouldBe(HttpStatusCode.Accepted);
+    }
+
+    [Fact]
+    public async Task AConfiguredTrustedProxyIsBelievedWhenItForwardsAVisitorAddress()
+    {
+        database.SkipIfUnavailable();
+        using var api = new JTAuthApi(database.ConnectionString, keyFile, new Dictionary<string, string>
+        {
+            ["RateLimits:CodeRequestsPerMinutePerIp"] = "2",
+            ["RateLimits:TrustedProxies:0"] = "198.51.100.9",
+        }, remoteAddress: "198.51.100.9");
+        using var jtauth = api.CreateClient();
+
+        async Task<HttpStatusCode> RequestAs(string visitorAddress)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/auth/code/request") { Content = JsonContent.Create(new RequestCodeRequest("citybars", NewAddress())) };
+            request.Headers.Add("X-Forwarded-For", visitorAddress);
+            using var response = await jtauth.SendAsync(request, Cancel);
+            return response.StatusCode;
+        }
+
+        (await RequestAs("203.0.113.5")).ShouldBe(HttpStatusCode.Accepted);
+        (await RequestAs("203.0.113.5")).ShouldBe(HttpStatusCode.Accepted);
+        (await RequestAs("203.0.113.5")).ShouldBe(HttpStatusCode.TooManyRequests);
+        (await RequestAs("203.0.113.6")).ShouldBe(HttpStatusCode.Accepted);
+    }
+
+    [Fact]
+    public async Task TheForwardedAddressIsIgnoredFromACallerThatIsNotTrusted()
+    {
+        database.SkipIfUnavailable();
+        using var api = new JTAuthApi(database.ConnectionString, keyFile, new Dictionary<string, string>
+        {
+            ["RateLimits:CodeRequestsPerMinutePerIp"] = "2",
+        }, remoteAddress: "198.51.100.9");
+        using var jtauth = api.CreateClient();
+
+        async Task<HttpStatusCode> RequestAs(string visitorAddress)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/auth/code/request") { Content = JsonContent.Create(new RequestCodeRequest("citybars", NewAddress())) };
+            request.Headers.Add("X-Forwarded-For", visitorAddress);
+            using var response = await jtauth.SendAsync(request, Cancel);
+            return response.StatusCode;
+        }
+
+        (await RequestAs("203.0.113.5")).ShouldBe(HttpStatusCode.Accepted);
+        (await RequestAs("203.0.113.6")).ShouldBe(HttpStatusCode.Accepted);
+        (await RequestAs("203.0.113.7")).ShouldBe(HttpStatusCode.TooManyRequests, "an untrusted caller cannot dodge the limit by changing the header");
     }
 }
