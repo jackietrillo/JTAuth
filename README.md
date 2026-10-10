@@ -4,7 +4,15 @@ The shared, passwordless sign-in service for all of Jackie Trillo's apps (CityBa
 
 ## Status
 
-Steps 1 (solution skeleton), 2 (database and client seed) and 3 (email-code sign-in and access tokens) are complete. The API signs people in with an emailed one-time code, creates the account on a first sign-in, and issues 15-minute RS256 access tokens that apps validate with stock `AddJwtBearer` against `/.well-known/jwks.json`. In Development the code is written to the log. Refresh tokens, profile and Google sign-in are the next steps.
+Steps 1 (solution skeleton), 2 (database and client seed), 3 (email-code sign-in and access tokens) and 4 (refresh, logout and profile) are complete. The API signs people in with an emailed one-time code, creates the account on a first sign-in, and issues 15-minute RS256 access tokens that apps validate with stock `AddJwtBearer` against `/.well-known/jwks.json`, plus single-use refresh tokens (30 days, rotated on every use, reuse ends the chain). A signed-in person can read and change their display name and change their sign-in email. In Development the code is written to the log. Google sign-in is the next step.
+
+| Endpoint | What it does |
+|---|---|
+| `POST /api/v1/auth/code/request`, `/code/verify` | Email-code sign-in (signing up and signing in are the same flow) |
+| `POST /api/v1/auth/refresh`, `/logout` | Swap a refresh token for a new pair; end the session |
+| `GET`/`PUT /api/v1/profile` | Display name and sign-in methods (access token required) |
+| `POST /api/v1/profile/email/request-code`, `/email/verify` | Change the sign-in email with a code sent to the new address |
+| `GET /.well-known/jwks.json`, `/openid-configuration` | The public keys apps validate tokens with |
 
 ## Build and test
 

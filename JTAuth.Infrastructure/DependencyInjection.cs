@@ -19,6 +19,7 @@ public static class DependencyInjection
         services.AddScoped<ILoginCodeRepository, LoginCodeRepository>();
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IUserClientRepository, UserClientRepository>();
+        services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
 
         services.AddSingleton(_ => RsaSigningKeys.LoadOrCreate(signingKeyFile));
         services.AddSingleton<ISigningKeySource>(provider => provider.GetRequiredService<RsaSigningKeys>());

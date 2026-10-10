@@ -45,6 +45,28 @@ App ─ POST /api/v1/auth/code/verify  {clientId, email, code} ─► VerifyLogi
 - An app validates with stock `AddJwtBearer` (`Authority` = JTAuth's issuer, `Audience` = its own). Set `MapInboundClaims = false` to read `sub` and `name` under their own names. The end-to-end test does exactly this, one scheme per audience, and a token for `citybars` is refused by the other audience.
 - **Email.** `IEmailSender` is in Application. Development registers `LoggingEmailSender`, which writes the message (code included) to the log. Any other environment refuses to start until a real sender is registered.
 
+## Sessions: refresh tokens and logout
+
+```
+sign-in ─► access token (15 min) + refresh token A1 ─ new chain (FamilyId)
+refresh(A1) ─► A1 revoked, A2 issued in the same chain, new access token
+refresh(A1) again (reuse) ─► whole chain revoked: A2 is dead too, the person signs in with a code
+logout(A2) ─► the chain is revoked
+```
+
+- A refresh token is 256 random bits, URL-safe, and only its SHA-256 is stored (`RefreshTokenRules`). It is bound to one person and one app; each use issues the next token in the chain, valid 30 days from that moment (sliding, no absolute cap).
+- **Rotation is one SQL transaction** (`RefreshTokenRepository.RotateAsync`): a conditional `UPDATE ... WHERE RevokedUtc IS NULL AND ExpiresUtc > now` revokes the token, and only if that changed a row is the replacement inserted and `ReplacedByTokenId` set. Of any number of parallel requests with the same token exactly one wins; the losers are treated as reuse and end the chain (an integration test runs the race).
+- **Reuse detection.** A token presented after it was revoked (already used, or logged out) ends its whole chain with one `UPDATE ... WHERE FamilyId = ...`; other chains of the same person, such as another device, are untouched. A token presented to a different app than it was issued to, an unknown token and an expired one are refused without revoking anything. Every failure is the same `401 invalid_refresh_token`. A person who refreshes from two places at once with the same token therefore gets signed out: callers should serialize refreshes (a backend-for-frontend does).
+- A refresh reads the person afresh (`IUserRepository.FindByIdAsync`), so a changed display name is in the next access token's `name` claim. A refresh is not a sign-in, so it does not touch `UserClient`.
+- **Logout** revokes the presented token's chain and answers `204` for any token, so it says nothing about which tokens exist.
+
+## The profile
+
+- `GET`/`PUT /api/v1/profile` and the two email-change calls need an access token. JTAuth validates it itself with `AddJwtBearer`, using the public half of its own signing key (`RsaSigningKeys.ValidationKeys`), the configured issuer and the 15-minute expiry. The audience is not fixed (a token for any app is a token for the same person); instead an `OnTokenValidated` check requires the `aud` to belong to a registered, enabled app, so a disabled app's tokens stop working here as well.
+- The profile lists how the person can sign in: Email (`Linked` with its address, or `NotLinked`), Google (`Linked` or `NotLinked`; the Google subject is never returned) and Phone (`ComingSoon`).
+- **Display name** rules are in `DisplayName` (trimmed, 1 to 50 characters, one line, no control characters).
+- **Changing the sign-in email** reuses the sign-in code machinery: `LoginCodeFlow` (Application) holds sending a code with its limits and redeeming it with its attempt and single-use rules, and both sign-in and the email change call it, so there is one set of rules. The code is sent to the new address, naming the app of the token's `aud`. If another account owns the address the answer is the same `202` but no code is sent. `UserRepository.ChangeEmailAsync` moves the person's email identity (or adds one for a person with none) in a transaction; the unique key on `(Provider, ProviderSubject)` settles a race between two people wanting the same address (one gets `409 email_in_use`).
+
 ## Running and testing
 
 - Local: `./scripts/deploy-db.ps1 -Environment local -Server 'localhost\SQLEXPRESS'`, set `ConnectionStrings__JTAuthDb` for the named instance, then `dotnet run --project JTAuth.Api` (https://localhost:7200). Development settings supply the issuer and a development-only `JTAuth:CodeSecret`.
@@ -64,3 +86,7 @@ App ─ POST /api/v1/auth/code/verify  {clientId, email, code} ─► VerifyLogi
 | 7 | RS256 with a key file outside the repository | Every JWT library validates RS256 from a JWKS; the file is generated on first run and never committed, and Key Vault replaces it in Azure. |
 | 8 | `UserClient` is written with one `MERGE` that mentions only the sign-in times | Consent and revocation belong to later features and must survive every sign-in; leaving them out of the statement guarantees it. |
 | 9 | Unit tests use in-memory repositories that mirror the SQL rules; SQL is proved by integration tests | Whole flows (five wrong attempts then the right code, replaced codes, rate limits) run in milliseconds, while the race conditions are tested where they actually happen. |
+| 10 | A refresh-token chain per sign-in; reuse ends that chain only | A leaked token should log out the device it leaked from, not every device the person uses. Rotation and reuse detection are decided by conditional `UPDATE`s, so they hold under parallel requests. No absolute chain lifetime: a regular user is never asked for a code again, and the cost of a stolen chain is bounded by detection on the owner's next refresh. |
+| 11 | JTAuth validates its own access tokens for the profile, with a registered-and-enabled-app check instead of a fixed audience | The profile belongs to the person, whichever app the token came from; checking the audience against the client table still switches off a disabled app's tokens. |
+| 12 | Changing the sign-in email goes through the same code rules as signing in, and a taken address gets the same answer but no code | One set of tested rules; a signed-in person cannot probe which addresses have accounts. |
+| 13 | A refresh is not a sign-in | `UserClient.LastSignInUtc` keeps meaning "the last time the person proved who they are with a code". |

@@ -13,4 +13,12 @@ public sealed class ClientRepository(JTAuthDatabase database) : IClientRepositor
             "SELECT Id, ClientId, Name, Audience, IsEnabled FROM dbo.Client WHERE ClientId = @clientId;",
             new { clientId }, cancellationToken: cancellationToken)).ConfigureAwait(false);
     }
+
+    public async Task<Client?> FindByAudienceAsync(string audience, CancellationToken cancellationToken)
+    {
+        await using var connection = await database.OpenAsync(cancellationToken).ConfigureAwait(false);
+        return await connection.QueryFirstOrDefaultAsync<Client>(new CommandDefinition(
+            "SELECT TOP (1) Id, ClientId, Name, Audience, IsEnabled FROM dbo.Client WHERE Audience = @audience ORDER BY Id;",
+            new { audience }, cancellationToken: cancellationToken)).ConfigureAwait(false);
+    }
 }

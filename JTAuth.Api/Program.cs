@@ -50,6 +50,7 @@ else
     throw new InvalidOperationException("No email sender is configured for this environment.");
 }
 
+builder.Services.AddJTAuthAuthentication();
 builder.Services.AddControllers();
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
@@ -79,6 +80,8 @@ var app = builder.Build();
 
 app.UseExceptionHandler();
 app.UseRateLimiter();
+app.UseAuthentication();
+app.UseAuthorization();
 
 if (app.Environment.IsDevelopment())
 {

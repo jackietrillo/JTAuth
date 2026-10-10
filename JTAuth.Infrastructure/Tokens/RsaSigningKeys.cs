@@ -22,10 +22,16 @@ public sealed class RsaSigningKeys : ISigningKeySource
         [
             new PublicSigningKey(key.KeyId, SecurityAlgorithms.RsaSha256, Base64UrlEncoder.Encode(parameters.Modulus), Base64UrlEncoder.Encode(parameters.Exponent)),
         ];
+
+        // JTAuth checks its own tokens (for the profile) with the public half, exactly as an app would.
+        ValidationKeys = [new RsaSecurityKey(parameters) { KeyId = key.KeyId }];
     }
 
     /// <summary>What tokens are signed with.</summary>
     public SigningCredentials Credentials { get; }
+
+    /// <summary>The public keys JTAuth validates the tokens it receives with.</summary>
+    public IReadOnlyList<SecurityKey> ValidationKeys { get; }
 
     public IReadOnlyList<PublicSigningKey> PublishedKeys { get; }
 

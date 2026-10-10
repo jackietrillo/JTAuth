@@ -8,6 +8,9 @@ public interface IClientRepository
 {
     /// <summary>The registered app with this client id, or null.</summary>
     Task<Client?> FindByClientIdAsync(string clientId, CancellationToken cancellationToken);
+
+    /// <summary>The registered app whose tokens carry this audience, or null. Used to tell which app an access token was issued for.</summary>
+    Task<Client?> FindByAudienceAsync(string audience, CancellationToken cancellationToken);
 }
 
 public interface ILoginCodeRepository
@@ -38,6 +41,52 @@ public interface IUserRepository
     /// Safe under concurrent calls for the same identity: exactly one caller creates, the others see that person.
     /// </summary>
     Task<(User User, bool IsNew)> GetOrCreateByIdentityAsync(IdentityProvider provider, string providerSubject, DateTimeOffset now, CancellationToken cancellationToken);
+
+    /// <summary>The person with this id, or null.</summary>
+    Task<User?> FindByIdAsync(Guid userId, CancellationToken cancellationToken);
+
+    /// <summary>The id of the person who owns this sign-in identity, or null when nobody does.</summary>
+    Task<Guid?> FindOwnerAsync(IdentityProvider provider, string providerSubject, CancellationToken cancellationToken);
+
+    /// <summary>The ways this person can sign in (at most one per provider).</summary>
+    Task<IReadOnlyList<UserIdentity>> GetIdentitiesAsync(Guid userId, CancellationToken cancellationToken);
+
+    /// <summary>Sets the display name. Returns false when there is no such person.</summary>
+    Task<bool> UpdateDisplayNameAsync(Guid userId, string displayName, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Makes <paramref name="newEmail"/> the person's sign-in email (replacing the old address, or adding one when they had none).
+    /// Refused when the address already belongs to someone else.
+    /// </summary>
+    Task<EmailChangeResult> ChangeEmailAsync(Guid userId, string newEmail, DateTimeOffset now, CancellationToken cancellationToken);
+}
+
+/// <summary>A sign-in identity as the person sees it: how they sign in, and the address or id behind it.</summary>
+public sealed record UserIdentity(IdentityProvider Provider, string ProviderSubject);
+
+public enum EmailChangeResult
+{
+    Changed,
+    AddressTaken,
+    NoSuchUser,
+}
+
+public interface IRefreshTokenRepository
+{
+    /// <summary>Stores the first token of a new chain.</summary>
+    Task AddAsync(RefreshToken token, CancellationToken cancellationToken);
+
+    /// <summary>The stored token with this hash, used or not, or null.</summary>
+    Task<RefreshToken?> FindByHashAsync(byte[] tokenHash, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Revokes the token and stores its replacement in the same chain, as one change, but only if the token is still unused and
+    /// unexpired. Returns false when it was not (someone else used it first). Exactly one of any number of callers gets true.
+    /// </summary>
+    Task<bool> RotateAsync(long tokenId, RefreshToken replacement, DateTimeOffset now, CancellationToken cancellationToken);
+
+    /// <summary>Revokes every token of the chain that is not revoked yet.</summary>
+    Task RevokeChainAsync(Guid familyId, DateTimeOffset now, CancellationToken cancellationToken);
 }
 
 public interface IUserClientRepository

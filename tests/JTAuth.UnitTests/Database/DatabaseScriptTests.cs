@@ -119,6 +119,31 @@ public sealed partial class DatabaseScriptTests
         user.ShouldNotContain("Phone", Case.Insensitive);
     }
 
+    [Fact]
+    public void RefreshTokensFormChainsThatCanBeEndedAsAWhole()
+    {
+        var migration = File.ReadAllText(ScriptFiles("migrations").Single(file => file.Name.EndsWith("_refresh_chain.sql", StringComparison.Ordinal)).FullName);
+        var reference = File.ReadAllText(Path.Combine(DatabaseFolder, "schema.sql"));
+
+        foreach (var sql in new[] { migration, reference })
+        {
+            sql.ShouldContain("ADD FamilyId uniqueidentifier NOT NULL");
+            sql.ShouldContain("ADD ReplacedByTokenId bigint NULL");
+            sql.ShouldContain("FK_RefreshToken_ReplacedBy FOREIGN KEY (ReplacedByTokenId) REFERENCES dbo.RefreshToken (Id)");
+            sql.ShouldContain("CREATE INDEX IX_RefreshToken_FamilyId ON dbo.RefreshToken (FamilyId)");
+        }
+    }
+
+    [Fact]
+    public void ARefreshTokenIsStoredOnlyAsAHash()
+    {
+        var identity = File.ReadAllText(ScriptFiles("migrations").First().FullName);
+        var table = Regex.Match(identity, @"CREATE TABLE dbo\.RefreshToken(?<body>.*?)\);", RegexOptions.Singleline).Groups["body"].Value;
+
+        table.ShouldContain("TokenHash  varbinary(64)");
+        Regex.IsMatch(table, @"\bToken\s+(n?varchar|char)", RegexOptions.IgnoreCase).ShouldBeFalse("only the hash of a refresh token may be stored");
+    }
+
     [GeneratedRegex(@"^(\d{4})_[a-z0-9_]+\.sql$")]
     private static partial Regex NumberedScriptName();
 

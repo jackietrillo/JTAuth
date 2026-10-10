@@ -26,12 +26,14 @@ public sealed class VerifyLoginCodeValidator : AbstractValidator<VerifyLoginCode
 /// <summary>
 /// Every way the code can be wrong (no code for the address, wrong digits, expired, used, replaced, out of attempts)
 /// gets the same answer, so the response says nothing about whether the address has an account or which rule failed.
+/// A successful sign-in starts a new chain of refresh tokens for this person and app.
 /// </summary>
 public sealed class VerifyLoginCodeHandler(
     IClientRepository clients,
     ILoginCodeRepository codes,
     IUserRepository users,
     IUserClientRepository userClients,
+    IRefreshTokenRepository refreshTokens,
     IAccessTokenIssuer tokenIssuer,
     JTAuthSettings settings,
     TimeProvider clock) : ICommandHandler<VerifyLoginCodeCommand, AuthTokensDto>
@@ -52,20 +54,7 @@ public sealed class VerifyLoginCodeHandler(
         var email = EmailAddress.Normalize(command.Email);
         var now = clock.GetUtcNow();
 
-        var stored = await codes.FindLatestAsync(IdentityProvider.Email, email, cancellationToken).ConfigureAwait(false);
-        if (stored is null || stored.StateAt(now) != LoginCodeState.Usable)
-        {
-            return Result.Failure<AuthTokensDto>(InvalidCode);
-        }
-
-        // The attempt is counted before the comparison, so a burst of parallel guesses is still limited to five.
-        if (!await codes.TryClaimAttemptAsync(stored.Id, LoginCodeRules.MaxAttempts, cancellationToken).ConfigureAwait(false))
-        {
-            return Result.Failure<AuthTokensDto>(InvalidCode);
-        }
-
-        var presented = LoginCodeRules.Hash(settings.CodeSecret, IdentityProvider.Email, email, command.Code);
-        if (!stored.Matches(presented) || !await codes.TryConsumeAsync(stored.Id, now, cancellationToken).ConfigureAwait(false))
+        if (!await LoginCodeFlow.RedeemAsync(codes, settings, now, email, command.Code, cancellationToken).ConfigureAwait(false))
         {
             return Result.Failure<AuthTokensDto>(InvalidCode);
         }
@@ -73,7 +62,11 @@ public sealed class VerifyLoginCodeHandler(
         var (user, isNew) = await users.GetOrCreateByIdentityAsync(IdentityProvider.Email, email, now, cancellationToken).ConfigureAwait(false);
         await userClients.RecordSignInAsync(user.Id, client.Id, now, cancellationToken).ConfigureAwait(false);
 
-        var token = tokenIssuer.Issue(user, client, now);
-        return Result.Success(new AuthTokensDto(token.Token, token.ExpiresUtc, isNew));
+        var (refreshToken, refreshHash) = RefreshTokenRules.Generate();
+        var chain = RefreshToken.StartChain(user.Id, client.Id, refreshHash, now);
+        await refreshTokens.AddAsync(chain, cancellationToken).ConfigureAwait(false);
+
+        var access = tokenIssuer.Issue(user, client, now);
+        return Result.Success(new AuthTokensDto(access.Token, access.ExpiresUtc, refreshToken, chain.ExpiresUtc, isNew));
     }
 }

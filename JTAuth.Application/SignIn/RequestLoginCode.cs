@@ -31,7 +31,7 @@ public sealed class RequestLoginCodeHandler(
     JTAuthSettings settings,
     TimeProvider clock) : ICommandHandler<RequestLoginCodeCommand, CodeRequestedDto>
 {
-    public const string TooManyRequestsCode = "too_many_code_requests";
+    public const string TooManyRequestsCode = LoginCodeFlow.TooManyRequestsCode;
 
     public async Task<Result<CodeRequestedDto>> HandleAsync(RequestLoginCodeCommand command, CancellationToken cancellationToken)
     {
@@ -41,21 +41,6 @@ public sealed class RequestLoginCodeHandler(
             return Result.Failure<CodeRequestedDto>(error!);
         }
 
-        var email = EmailAddress.Normalize(command.Email);
-        var now = clock.GetUtcNow();
-
-        var lastMinute = await codes.CountIssuedSinceAsync(IdentityProvider.Email, email, now.AddMinutes(-1), cancellationToken).ConfigureAwait(false);
-        var lastHour = await codes.CountIssuedSinceAsync(IdentityProvider.Email, email, now.AddHours(-1), cancellationToken).ConfigureAwait(false);
-        if (lastMinute >= settings.CodeRequestsPerAddressPerMinute || lastHour >= settings.CodeRequestsPerAddressPerHour)
-        {
-            return Result.Failure<CodeRequestedDto>(ResultError.TooManyRequests(TooManyRequestsCode, "Too many codes were requested for this address. Try again later."));
-        }
-
-        var code = LoginCodeRules.GenerateCode();
-        var stored = LoginCode.Issue(IdentityProvider.Email, email, LoginCodeRules.Hash(settings.CodeSecret, IdentityProvider.Email, email, code), now);
-        await codes.ReplaceAsync(stored, now, cancellationToken).ConfigureAwait(false);
-        await emailSender.SendLoginCodeAsync(email, client.Name, code, stored.ExpiresUtc, cancellationToken).ConfigureAwait(false);
-
-        return Result.Success(new CodeRequestedDto((int)LoginCodeRules.Lifetime.TotalSeconds));
+        return await LoginCodeFlow.IssueAsync(codes, emailSender, settings, clock.GetUtcNow(), client, EmailAddress.Normalize(command.Email), cancellationToken).ConfigureAwait(false);
     }
 }

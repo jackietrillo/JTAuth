@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using JTAuth.BuildingBlocks;
 using Microsoft.AspNetCore.Mvc;
 
@@ -7,7 +8,15 @@ namespace JTAuth.Api.Controllers;
 [ApiController]
 public abstract class ApiController : ControllerBase
 {
+    /// <summary>The signed-in person's id: the <c>sub</c> claim of the access token. Only used behind <c>[Authorize]</c>.</summary>
+    protected Guid CurrentUserId => Guid.TryParse(User.FindFirstValue("sub"), out var userId) ? userId : Guid.Empty;
+
+    /// <summary>The audience of the access token, which says which app it was issued for.</summary>
+    protected string CurrentAudience => User.FindFirstValue("aud") ?? string.Empty;
+
     protected ActionResult<T> Respond<T>(Result<T> result) => Respond(result, value => Ok(value));
+
+    protected ActionResult RespondNoContent(Result<Unit> result) => Respond(result, _ => NoContent()).Result!;
 
     protected ActionResult<T> RespondAccepted<T>(Result<T> result) => Respond(result, value => Accepted(value));
 
