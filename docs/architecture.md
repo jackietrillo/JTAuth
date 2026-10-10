@@ -54,6 +54,16 @@ refresh(A1) again (reuse) ─► whole chain revoked: A2 is dead too, the person
 logout(A2) ─► the chain is revoked
 ```
 
+**In plain words.** A sign-in gives the app two tokens: a short-lived **access token** (a signed JWT the app checks itself) and a long-lived **refresh token** (a random string only JTAuth understands).
+
+- **Every 15 minutes or so:** while someone is using the app, it needs a new access token about every 15 minutes. It gets one by presenting the refresh token, so the person is never asked for a code again.
+- **A new refresh token every time:** each refresh returns a new access token *and* a new refresh token, and the old refresh token is revoked at that moment (single use). If someone copies a refresh token and uses it, the real user's next refresh presents one that was already replaced; JTAuth sees that and ends the chain.
+- **Only while in use:** the cycle runs only while the app is in use. If nobody opens the app, nothing refreshes and the last refresh token simply waits.
+- **If the 30 days run out:** each refresh token is good for 30 days from the moment it is issued. If it is not used within that time it expires and the person enters a code again. Every refresh gives the new token a fresh 30 days.
+- **The access token is not stored:** JTAuth keeps no copy of it. Only the hash of the refresh token is in the database (`RefreshToken.TokenHash`).
+
+**How it works.**
+
 - A refresh token is 256 random bits, URL-safe, and only its SHA-256 is stored (`RefreshTokenRules`). It is bound to one person and one app; each use issues the next token in the chain, valid 30 days from that moment (sliding, no absolute cap).
 - **Rotation is one SQL transaction** (`RefreshTokenRepository.RotateAsync`): a conditional `UPDATE ... WHERE RevokedUtc IS NULL AND ExpiresUtc > now` revokes the token, and only if that changed a row is the replacement inserted and `ReplacedByTokenId` set. Of any number of parallel requests with the same token exactly one wins; the losers are treated as reuse and end the chain (an integration test runs the race).
 - **Reuse detection.** A token presented after it was revoked (already used, or logged out) ends its whole chain with one `UPDATE ... WHERE FamilyId = ...`; other chains of the same person, such as another device, are untouched. A token presented to a different app than it was issued to, an unknown token and an expired one are refused without revoking anything. Every failure is the same `401 invalid_refresh_token`. A person who refreshes from two places at once with the same token therefore gets signed out: callers should serialize refreshes (a backend-for-frontend does).
