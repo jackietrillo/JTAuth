@@ -155,7 +155,7 @@ public sealed class ProfileHandlerTests
 
         await AskToChangeEmail(world, world.UserIdOf(), "new@example.com");
 
-        (await Get(world, world.UserIdOf())).Value!.SignInMethods[0].Address.ShouldBe("pat@example.com");
+        (await Get(world, world.UserIdOf())).Value!.SignInMethods[0].Value.ShouldBe("pat@example.com");
     }
 
     [Fact]
@@ -204,7 +204,7 @@ public sealed class ProfileHandlerTests
 
         result.Error!.Type.ShouldBe(ResultErrorType.Validation);
         result.Error.Code.ShouldBe(VerifyLoginCodeHandler.InvalidCodeCode);
-        (await Get(world, userId)).Value!.SignInMethods[0].Address.ShouldBe("pat@example.com");
+        (await Get(world, userId)).Value!.SignInMethods[0].Value.ShouldBe("pat@example.com");
     }
 
     [Fact]
@@ -219,7 +219,7 @@ public sealed class ProfileHandlerTests
         var result = await ConfirmEmailChange(world, userId, "someone.else@example.com", code);
 
         result.IsFailure.ShouldBeTrue();
-        (await Get(world, userId)).Value!.SignInMethods[0].Address.ShouldBe("pat@example.com");
+        (await Get(world, userId)).Value!.SignInMethods[0].Value.ShouldBe("pat@example.com");
     }
 
     [Fact]
@@ -267,7 +267,7 @@ public sealed class ProfileHandlerTests
 
         result.Error!.Type.ShouldBe(ResultErrorType.Conflict);
         result.Error.Code.ShouldBe(ConfirmEmailChangeHandler.EmailInUseCode);
-        (await Get(world, userId)).Value!.SignInMethods[0].Address.ShouldBe("pat@example.com");
+        (await Get(world, userId)).Value!.SignInMethods[0].Value.ShouldBe("pat@example.com");
     }
 
     [Fact]

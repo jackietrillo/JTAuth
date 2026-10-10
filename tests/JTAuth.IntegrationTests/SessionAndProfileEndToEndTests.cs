@@ -265,7 +265,7 @@ public sealed class SessionAndProfileEndToEndTests(SqlServerDatabase database) :
         sent.AppName.ShouldBe("CityBars");
         wrong.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
         confirm.StatusCode.ShouldBe(HttpStatusCode.OK);
-        (await confirm.Content.ReadFromJsonAsync<ProfileDto>(Cancel))!.SignInMethods[0].Address.ShouldBe(newAddress);
+        (await confirm.Content.ReadFromJsonAsync<ProfileDto>(Cancel))!.SignInMethods[0].Value.ShouldBe(newAddress);
 
         var withNew = await SignInAsync(api, client, newAddress);
         var withOld = await SignInAsync(api, client, oldAddress);

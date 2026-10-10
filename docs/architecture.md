@@ -73,7 +73,7 @@ logout(A2) ─► the chain is revoked
 ## The profile
 
 - `GET`/`PUT /api/v1/profile` and the two email-change calls need an access token. JTAuth validates it itself with `AddJwtBearer`, using the public half of its own signing key (`RsaSigningKeys.ValidationKeys`), the configured issuer and the 15-minute expiry. The audience is not fixed (a token for any app is a token for the same person); instead an `OnTokenValidated` check requires the `aud` to belong to a registered, enabled app, so a disabled app's tokens stop working here as well.
-- The profile lists how the person can sign in: Email (`Linked` with its address, or `NotLinked`), Google (`Linked` or `NotLinked`; the Google subject is never returned) and Phone (`ComingSoon`).
+- The profile lists how the person can sign in: Email (`Linked` with its address as `value`, or `NotLinked`), Google (`Linked` or `NotLinked`; the Google subject is never returned) and Phone (`ComingSoon`).
 - **Display name** rules are in `DisplayName` (trimmed, 1 to 50 characters, one line, no control characters).
 - **Changing the sign-in email** reuses the sign-in code machinery: `LoginCodeFlow` (Application) holds sending a code with its limits and redeeming it with its attempt and single-use rules, and both sign-in and the email change call it, so there is one set of rules. The code is sent to the new address, naming the app of the token's `aud`. If another account owns the address the answer is the same `202` but no code is sent. `UserRepository.ChangeEmailAsync` moves the person's email identity (or adds one for a person with none) in a transaction; the unique key on `(Provider, ProviderSubject)` settles a race between two people wanting the same address (one gets `409 email_in_use`).
 

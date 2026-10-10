@@ -61,7 +61,7 @@ public sealed class SignInWithGoogleHandlerTests
         (await world.Users.FindByIdAsync(existingId, Cancel))!.DisplayName.ShouldBeNull("Google's name is used only for a new account");
         var profile = (await world.GetProfile.HandleAsync(new GetProfileQuery(existingId), Cancel)).Value!;
         profile.SignInMethods.Single(method => method.Provider == "Google").Status.ShouldBe("Linked");
-        profile.SignInMethods.Single(method => method.Provider == "Email").Address.ShouldBe("pat@example.com");
+        profile.SignInMethods.Single(method => method.Provider == "Email").Value.ShouldBe("pat@example.com");
     }
 
     [Fact]

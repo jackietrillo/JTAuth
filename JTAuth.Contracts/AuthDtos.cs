@@ -36,8 +36,8 @@ public sealed record LogoutRequest(string RefreshToken);
 /// <summary>The person's own details: their display name and how they can sign in.</summary>
 public sealed record ProfileDto(string? DisplayName, IReadOnlyList<SignInMethodDto> SignInMethods);
 
-/// <summary>One way of signing in. <see cref="Status"/> is <c>Linked</c>, <c>NotLinked</c> or <c>ComingSoon</c>; <see cref="Address"/> is the email address for a linked email method.</summary>
-public sealed record SignInMethodDto(string Provider, string Status, string? Address);
+/// <summary>One way of signing in. <see cref="Status"/> is <c>Linked</c>, <c>NotLinked</c> or <c>ComingSoon</c>; <see cref="Value"/> is what identifies a linked method: the email address for the email method (later the number for phone).</summary>
+public sealed record SignInMethodDto(string Provider, string Status, string? Value);
 
 public sealed record UpdateProfileRequest(string DisplayName);
 

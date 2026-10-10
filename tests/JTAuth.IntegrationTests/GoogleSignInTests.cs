@@ -211,7 +211,7 @@ public sealed class GoogleSignInEndToEndTests(SqlServerDatabase database) : IDis
         var profile = await ProfileAsync(client, tokens.AccessToken);
         profile.DisplayName.ShouldBe("Pat Smith");
         profile.SignInMethods.Single(method => method.Provider == "Google").Status.ShouldBe("Linked");
-        profile.SignInMethods.Single(method => method.Provider == "Email").Address.ShouldBe(email);
+        profile.SignInMethods.Single(method => method.Provider == "Email").Value.ShouldBe(email);
     }
 
     [Fact]
