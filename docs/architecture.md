@@ -91,6 +91,15 @@ Page ─► app web server ─ POST /api/v1/auth/google {clientId, idToken} ─�
 - **Client ids are a list** (`JTAuth:GoogleClientIds`): one for each environment (the Test client for `localhost`, a Prod client for the real site) and one for each phone platform, which Google requires to be separate clients. Empty means the endpoint answers `404` and Google is never contacted. The ids are public values (they appear in the page); the client secret from Google's download file is not used and must not be kept in either repository.
 - **Not done:** an ID token has no unique id to remember, so one stolen within its hour of validity could be replayed; the app sends it over TLS straight from Google's script to its own server and JTAuth issues its own short-lived tokens in exchange, which is the usual trade-off. A `nonce` can be added if it is ever needed. The Google profile picture is not stored.
 
+## Service keys and the contact lookup
+
+An app's server (not a browser, not a person) can ask JTAuth about the app's own people, identified by a **service key**.
+
+- **The key.** A long random value the app keeps in its secrets (`JTAuth__ServiceKey` for CityBars). JTAuth stores only its SHA-256 in `Client.ServiceKeyHash` (`ServiceKeyRules.Hash`), so the database never holds a key that works. `scripts/set-service-key.ps1 -ClientId citybars` sets or replaces it (printing a new random one once when none is given) and `-Remove` clears it. A client with no key cannot ask.
+- **The call.** `POST /api/v1/contacts/lookup` with `Authorization: Bearer <key>` and `{ userIds }` (`ContactsController`, `LookupContactsHandler`). The key is looked up first, so a caller without a valid one learns nothing about the request; a disabled client is 403. It returns the sign-in email only for people with a `UserClient` row for the **calling** client who are not revoked, so one app cannot read another app's people. Not cached; logged with the client and counts, never the addresses.
+- **Not consent.** The lookup is for an app's staff to tell its accounts apart. Contacting people (a newsletter) is the consent-gated `GET /contacts` that is still to come.
+- **Tests.** `LookupContactsHandlerTests` (the key, another app's key, a disabled app, the 200 limit, people of other apps) and `ContactsEndToEndTests` (real database over HTTP, including a person who signed in to two apps).
+
 ## Running and testing
 
 - Local: `./scripts/deploy-db.ps1 -Environment local -Server 'localhost\SQLEXPRESS'`, set `ConnectionStrings__JTAuthDb` for the named instance, then `dotnet run --project JTAuth.Api` (https://localhost:7200). Development settings supply the issuer and a development-only `JTAuth:CodeSecret`.
