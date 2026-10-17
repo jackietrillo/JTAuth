@@ -23,4 +23,22 @@ public sealed class UserClientRepository(JTAuthDatabase database) : IUserClientR
             """,
             new { userId, clientId, now = SqlTime.ToSql(now) }, cancellationToken: cancellationToken)).ConfigureAwait(false);
     }
-}
+
+    public async Task<IReadOnlyList<UserEmail>> FindEmailsAsync(int clientId, IReadOnlyList<Guid> userIds, CancellationToken cancellationToken)
+    {
+        if (userIds.Count == 0)
+        {
+            return [];
+        }
+
+        await using var connection = await database.OpenAsync(cancellationToken).ConfigureAwait(false);
+        var rows = await connection.QueryAsync<UserEmail>(new CommandDefinition(
+            """
+            SELECT uc.UserId, ui.ProviderSubject AS Email
+            FROM dbo.UserClient uc
+            LEFT JOIN dbo.UserIdentity ui ON ui.UserId = uc.UserId AND ui.Provider = 'Email'
+            WHERE uc.ClientId = @clientId AND uc.RevokedUtc IS NULL AND uc.UserId IN @userIds;
+            """,
+            new { clientId, userIds }, cancellationToken: cancellationToken)).ConfigureAwait(false);
+        return rows.ToList();
+    }}

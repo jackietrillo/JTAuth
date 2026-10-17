@@ -33,6 +33,14 @@ internal sealed class InMemoryClients : IClientRepository
 
     public Task<Client?> FindByAudienceAsync(string audience, CancellationToken cancellationToken) =>
         Task.FromResult(clients.FirstOrDefault(client => client.Audience == audience));
+
+    private readonly Dictionary<int, byte[]> serviceKeyHashes = [];
+
+    /// <summary>Gives an app a service key, stored the way the database stores it: as a hash.</summary>
+    public void SetServiceKey(string clientId, string key) => serviceKeyHashes[clients.Single(client => client.ClientId == clientId).Id] = ServiceKeyRules.Hash(key)!;
+
+    public Task<Client?> FindByServiceKeyHashAsync(byte[] serviceKeyHash, CancellationToken cancellationToken) =>
+        Task.FromResult(clients.SingleOrDefault(client => serviceKeyHashes.TryGetValue(client.Id, out var stored) && stored.SequenceEqual(serviceKeyHash)));
 }
 
 /// <summary>Follows the same rules as the SQL repository, so the handler tests exercise whole flows.</summary>
@@ -196,6 +204,12 @@ internal sealed class RecordingUserClients : IUserClientRepository
         SignIns.Add((userId, clientId, now));
         return Task.CompletedTask;
     }
+
+    /// <summary>The people each app knows and their sign-in email (null: an account with none), as the database would hold them.</summary>
+    public Dictionary<(int ClientId, Guid UserId), string?> Known { get; } = [];
+
+    public Task<IReadOnlyList<UserEmail>> FindEmailsAsync(int clientId, IReadOnlyList<Guid> userIds, CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<UserEmail>>([.. userIds.Where(id => Known.ContainsKey((clientId, id))).Select(id => new UserEmail(id, Known[(clientId, id)]))]);
 }
 
 /// <summary>Follows the same rules as the SQL repository: a token is single use, and a chain can be ended as a whole.</summary>

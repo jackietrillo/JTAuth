@@ -14,6 +14,14 @@ public sealed class ClientRepository(JTAuthDatabase database) : IClientRepositor
             new { clientId }, cancellationToken: cancellationToken)).ConfigureAwait(false);
     }
 
+    public async Task<Client?> FindByServiceKeyHashAsync(byte[] serviceKeyHash, CancellationToken cancellationToken)
+    {
+        await using var connection = await database.OpenAsync(cancellationToken).ConfigureAwait(false);
+        return await connection.QuerySingleOrDefaultAsync<Client>(new CommandDefinition(
+            "SELECT Id, ClientId, Name, Audience, IsEnabled FROM dbo.Client WHERE ServiceKeyHash = @serviceKeyHash;",
+            new { serviceKeyHash }, cancellationToken: cancellationToken)).ConfigureAwait(false);
+    }
+
     public async Task<Client?> FindByAudienceAsync(string audience, CancellationToken cancellationToken)
     {
         await using var connection = await database.OpenAsync(cancellationToken).ConfigureAwait(false);

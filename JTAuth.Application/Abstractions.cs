@@ -11,6 +11,9 @@ public interface IClientRepository
 
     /// <summary>The registered app whose tokens carry this audience, or null. Used to tell which app an access token was issued for.</summary>
     Task<Client?> FindByAudienceAsync(string audience, CancellationToken cancellationToken);
+
+    /// <summary>The registered app whose service key has this hash, or null. A disabled app is returned; the caller decides what that means.</summary>
+    Task<Client?> FindByServiceKeyHashAsync(byte[] serviceKeyHash, CancellationToken cancellationToken);
 }
 
 public interface ILoginCodeRepository
@@ -135,7 +138,16 @@ public interface IUserClientRepository
     /// last sign-in time forward. Contact consent and revocation are never touched.
     /// </summary>
     Task RecordSignInAsync(Guid userId, int clientId, DateTimeOffset now, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The sign-in email of each of these people who has signed in to this app and has not been revoked from it. People who have not,
+    /// and people who belong only to other apps, are left out. The email is null for an account that has none.
+    /// </summary>
+    Task<IReadOnlyList<UserEmail>> FindEmailsAsync(int clientId, IReadOnlyList<Guid> userIds, CancellationToken cancellationToken);
 }
+
+/// <summary>A person of an app and their sign-in email address, if they have one.</summary>
+public sealed record UserEmail(Guid UserId, string? Email);
 
 public interface IEmailSender
 {
