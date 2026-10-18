@@ -7,13 +7,14 @@ namespace JTAuth.Infrastructure.Tokens;
 
 /// <summary>
 /// Signs the short-lived access token an app validates locally: <c>iss</c> (JTAuth), <c>aud</c> (the client's audience),
-/// <c>sub</c> (the person), <c>name</c> (only when set), <c>iat</c>, <c>exp</c> and a unique <c>jti</c>.
+/// <c>sub</c> (the person), <c>name</c> (only when set), <c>auth_time</c> (when the person last signed in, in seconds since 1970, when
+/// known), <c>iat</c>, <c>exp</c> and a unique <c>jti</c>.
 /// </summary>
 public sealed class AccessTokenIssuer(RsaSigningKeys keys, JTAuthSettings settings) : IAccessTokenIssuer
 {
     private static readonly JsonWebTokenHandler Handler = new();
 
-    public IssuedAccessToken Issue(User user, Client client, DateTimeOffset now)
+    public IssuedAccessToken Issue(User user, Client client, DateTimeOffset now, DateTimeOffset? signedInUtc = null)
     {
         ArgumentNullException.ThrowIfNull(user);
         ArgumentNullException.ThrowIfNull(client);
@@ -27,6 +28,11 @@ public sealed class AccessTokenIssuer(RsaSigningKeys keys, JTAuthSettings settin
         if (!string.IsNullOrWhiteSpace(user.DisplayName))
         {
             claims["name"] = user.DisplayName;
+        }
+
+        if (signedInUtc is not null)
+        {
+            claims["auth_time"] = signedInUtc.Value.ToUnixTimeSeconds();
         }
 
         var descriptor = new SecurityTokenDescriptor

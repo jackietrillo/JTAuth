@@ -70,6 +70,14 @@ logout(A2) ─► the chain is revoked
 - A refresh reads the person afresh (`IUserRepository.FindByIdAsync`), so a changed display name is in the next access token's `name` claim. A refresh is not a sign-in, so it does not touch `UserClient`.
 - **Logout** revokes the presented token's chain and answers `204` for any token, so it says nothing about which tokens exist.
 
+## Sign-in time and deleting an account
+
+- **`auth_time`.** A sign-in (a code or Google) starts a chain of refresh tokens, and `RefreshToken.SignedInUtc` (migration `0004`) records when. Every replacement in the chain carries the same time (`RefreshToken.Next`), and `AccessTokenIssuer` puts it in each access token as `auth_time` (seconds since 1970). Refreshing is not signing in again, so the time stays that of the sign-in; a token stored before the column existed falls back to its creation time. An app uses it to ask for a recent sign-in before something that cannot be undone.
+- **`DELETE /api/v1/profile`** (`DeleteAccountHandler`) deletes the person's account for the app the token was issued for (the `aud`). It needs `auth_time` within `AccountRules.RecentSignInWindow` (10 minutes, one minute of clock difference allowed), otherwise `403` and nothing changes. It answers `{ accountRemoved }`.
+- **One app, or all of them.** `UserRepository.DeleteAccountAsync`, in one transaction that locks the person: if the person also has a `UserClient` row or refresh tokens for another app, only this app's sessions and `UserClient` row are removed (`accountRemoved: false`) and the person can still sign in to the other app; otherwise the sign-in codes sent to their addresses, their identities, every session and the person are removed, so nothing that says who they are is kept (`accountRemoved: true`). The same address can sign up again later, as a new person with a new id.
+- **After it.** The access token still validates until it expires (15 minutes) but the person is gone: `GET /profile` answers `401` ("This account no longer exists") and a repeated delete finds no one, which the app treats as "already done".
+- Tests: `DeleteAccountHandlerTests`, `RefreshTokenTests`, `RefreshTokensHandlerTests` and `AccountDeletionEndToEndTests` (against SQL Server).
+
 ## The profile
 
 - `GET`/`PUT /api/v1/profile` and the two email-change calls need an access token. JTAuth validates it itself with `AddJwtBearer`, using the public half of its own signing key (`RsaSigningKeys.ValidationKeys`), the configured issuer and the 15-minute expiry. The audience is not fixed (a token for any app is a token for the same person); instead an `OnTokenValidated` check requires the `aud` to belong to a registered, enabled app, so a disabled app's tokens stop working here as well.

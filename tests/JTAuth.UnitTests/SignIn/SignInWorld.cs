@@ -103,6 +103,34 @@ internal sealed class InMemoryUsers : IUserRepository
 
     public IReadOnlyCollection<User> All => users.Values;
 
+    /// <summary>People who also use another app, so deleting their account from one leaves the account itself.</summary>
+    public HashSet<Guid> UseAnotherApp { get; } = [];
+
+    /// <summary>Every (person, app) a delete was asked for, in order.</summary>
+    public List<(Guid UserId, int ClientId)> Deletions { get; } = [];
+
+    public Task<AccountDeletion> DeleteAccountAsync(Guid userId, int clientId, CancellationToken cancellationToken)
+    {
+        Deletions.Add((userId, clientId));
+        if (!users.ContainsKey(userId))
+        {
+            return Task.FromResult(AccountDeletion.NoSuchUser);
+        }
+
+        if (UseAnotherApp.Contains(userId))
+        {
+            return Task.FromResult(AccountDeletion.LeftApp);
+        }
+
+        users.Remove(userId);
+        foreach (var key in identities.Where(pair => pair.Value == userId).Select(pair => pair.Key).ToList())
+        {
+            identities.Remove(key);
+        }
+
+        return Task.FromResult(AccountDeletion.AccountRemoved);
+    }
+
     public Task<(User User, bool IsNew)> GetOrCreateByIdentityAsync(IdentityProvider provider, string providerSubject, DateTimeOffset now, CancellationToken cancellationToken)
     {
         if (identities.TryGetValue((provider, providerSubject), out var existingId))
@@ -275,9 +303,13 @@ internal sealed class RecordingTokenIssuer : IAccessTokenIssuer
 {
     public List<(User User, Client Client)> Issued { get; } = [];
 
-    public IssuedAccessToken Issue(User user, Client client, DateTimeOffset now)
+    /// <summary>The sign-in time each token was issued with, in the order they were issued.</summary>
+    public List<DateTimeOffset?> SignedIn { get; } = [];
+
+    public IssuedAccessToken Issue(User user, Client client, DateTimeOffset now, DateTimeOffset? signedInUtc = null)
     {
         Issued.Add((user, client));
+        SignedIn.Add(signedInUtc);
         return new IssuedAccessToken($"token:{user.Id}:{client.Audience}", now + TokenRules.AccessTokenLifetime);
     }
 }
@@ -317,6 +349,7 @@ internal sealed class SignInWorld
         UpdateDisplayName = new UpdateDisplayNameHandler(Users);
         RequestEmailChange = new RequestEmailChangeHandler(Clients, Users, Codes, Email, Settings, Clock);
         ConfirmEmailChange = new ConfirmEmailChangeHandler(Users, Codes, Settings, Clock);
+        DeleteAccount = new DeleteAccountHandler(Clients, Users, Clock);
     }
 
     public TestClock Clock { get; }
@@ -356,6 +389,8 @@ internal sealed class SignInWorld
     public RequestEmailChangeHandler RequestEmailChange { get; }
 
     public ConfirmEmailChangeHandler ConfirmEmailChange { get; }
+
+    public DeleteAccountHandler DeleteAccount { get; }
 
     /// <summary>Asks for a code and returns the one that was emailed.</summary>
     public async Task<string> RequestCodeAsync(string address = "pat@example.com", string clientId = "citybars")

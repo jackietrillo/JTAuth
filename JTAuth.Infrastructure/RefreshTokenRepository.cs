@@ -8,9 +8,9 @@ namespace JTAuth.Infrastructure;
 public sealed class RefreshTokenRepository(JTAuthDatabase database) : IRefreshTokenRepository
 {
     private const string InsertSql = """
-        INSERT dbo.RefreshToken (UserId, ClientId, FamilyId, TokenHash, ExpiresUtc, CreatedUtc)
+        INSERT dbo.RefreshToken (UserId, ClientId, FamilyId, TokenHash, ExpiresUtc, CreatedUtc, SignedInUtc)
         OUTPUT inserted.Id
-        VALUES (@userId, @clientId, @familyId, @tokenHash, @expiresUtc, @createdUtc);
+        VALUES (@userId, @clientId, @familyId, @tokenHash, @expiresUtc, @createdUtc, @signedInUtc);
         """;
 
     public async Task AddAsync(RefreshToken token, CancellationToken cancellationToken)
@@ -25,12 +25,12 @@ public sealed class RefreshTokenRepository(JTAuthDatabase database) : IRefreshTo
     {
         await using var connection = await database.OpenAsync(cancellationToken).ConfigureAwait(false);
         var row = await connection.QuerySingleOrDefaultAsync<RefreshTokenRow>(new CommandDefinition(
-            "SELECT Id, UserId, ClientId, FamilyId, ExpiresUtc, RevokedUtc, CreatedUtc FROM dbo.RefreshToken WHERE TokenHash = @tokenHash;",
+            "SELECT Id, UserId, ClientId, FamilyId, ExpiresUtc, RevokedUtc, CreatedUtc, SignedInUtc FROM dbo.RefreshToken WHERE TokenHash = @tokenHash;",
             new { tokenHash }, cancellationToken: cancellationToken)).ConfigureAwait(false);
 
         return row is null
             ? null
-            : new RefreshToken(row.Id, row.UserId, row.ClientId, row.FamilyId, tokenHash, SqlTime.FromSql(row.ExpiresUtc), SqlTime.FromSql(row.RevokedUtc), SqlTime.FromSql(row.CreatedUtc));
+            : new RefreshToken(row.Id, row.UserId, row.ClientId, row.FamilyId, tokenHash, SqlTime.FromSql(row.ExpiresUtc), SqlTime.FromSql(row.RevokedUtc), SqlTime.FromSql(row.CreatedUtc), SqlTime.FromSql(row.SignedInUtc));
     }
 
     public async Task<bool> RotateAsync(long tokenId, RefreshToken replacement, DateTimeOffset now, CancellationToken cancellationToken)
@@ -75,7 +75,8 @@ public sealed class RefreshTokenRepository(JTAuthDatabase database) : IRefreshTo
         tokenHash = token.TokenHash,
         expiresUtc = SqlTime.ToSql(token.ExpiresUtc),
         createdUtc = SqlTime.ToSql(token.CreatedUtc),
+        signedInUtc = SqlTime.ToSql(token.SignedInAt),
     };
 
-    private sealed record RefreshTokenRow(long Id, Guid UserId, int ClientId, Guid FamilyId, DateTime ExpiresUtc, DateTime? RevokedUtc, DateTime CreatedUtc);
+    private sealed record RefreshTokenRow(long Id, Guid UserId, int ClientId, Guid FamilyId, DateTime ExpiresUtc, DateTime? RevokedUtc, DateTime CreatedUtc, DateTime? SignedInUtc);
 }

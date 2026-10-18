@@ -84,7 +84,7 @@ public sealed class RefreshTokensHandler(
         }
 
         // The person is read afresh, so a changed display name is in the new access token.
-        var access = tokenIssuer.Issue(user, client, now);
+        var access = tokenIssuer.Issue(user, client, now, next.SignedInAt);
         return Result.Success(new AuthTokensDto(access.Token, access.ExpiresUtc, refreshToken, next.ExpiresUtc, IsNewUser: false));
     }
 }

@@ -41,6 +41,12 @@ public sealed record SignInMethodDto(string Provider, string Status, string? Val
 
 public sealed record UpdateProfileRequest(string DisplayName);
 
+/// <summary>
+/// The answer to deleting an account from one app. <see cref="AccountRemoved"/> is true when nothing of the person is left (no other app had
+/// them), and false when only their place in this app was removed because they also use another one.
+/// </summary>
+public sealed record AccountDeletedDto(bool AccountRemoved);
+
 /// <summary>Starts changing the sign-in email: a code is sent to the new address.</summary>
 public sealed record RequestEmailChangeRequest(string NewEmail);
 

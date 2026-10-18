@@ -14,6 +14,13 @@ public abstract class ApiController : ControllerBase
     /// <summary>The audience of the access token, which says which app it was issued for.</summary>
     protected string CurrentAudience => User.FindFirstValue("aud") ?? string.Empty;
 
+    /// <summary>When the person last proved who they are: the <c>auth_time</c> claim (seconds since 1970), or null when the token has none.</summary>
+    protected DateTimeOffset? SignedInUtc =>
+        long.TryParse(User.FindFirstValue("auth_time"), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var seconds)
+        && seconds is > 0 and < 253_402_300_799
+            ? DateTimeOffset.FromUnixTimeSeconds(seconds)
+            : null;
+
     protected ActionResult<T> Respond<T>(Result<T> result) => Respond(result, value => Ok(value));
 
     protected ActionResult RespondNoContent(Result<Unit> result) => Respond(result, _ => NoContent()).Result!;

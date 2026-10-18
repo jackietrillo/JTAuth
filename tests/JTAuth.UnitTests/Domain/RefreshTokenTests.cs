@@ -66,6 +66,30 @@ public sealed class RefreshTokenTests
     }
 
     [Fact]
+    public void AChainRemembersWhenThePersonSignedInAndEveryReplacementKeepsThatTime()
+    {
+        var first = NewChain();
+        first.SignedInAt.ShouldBe(Now);
+
+        var second = first.Next(RefreshTokenRules.Generate().Hash, Now.AddDays(10));
+        var third = second.Next(RefreshTokenRules.Generate().Hash, Now.AddDays(20));
+
+        second.SignedInAt.ShouldBe(Now, "refreshing is not signing in");
+        third.SignedInAt.ShouldBe(Now);
+        third.CreatedUtc.ShouldBe(Now.AddDays(20));
+    }
+
+    [Fact]
+    public void ATokenStoredBeforeTheTimeWasKeptFallsBackToWhenItWasCreated()
+    {
+        var old = new RefreshToken(1, UserId, 1, Guid.NewGuid(), RefreshTokenRules.Generate().Hash, Now.AddDays(30), null, Now);
+
+        old.SignedInUtc.ShouldBeNull();
+        old.SignedInAt.ShouldBe(Now);
+        old.Next(RefreshTokenRules.Generate().Hash, Now.AddDays(5)).SignedInAt.ShouldBe(Now);
+    }
+
+    [Fact]
     public void ATokenExpiresAfterThirtyDaysAndNotBefore()
     {
         var token = NewChain();

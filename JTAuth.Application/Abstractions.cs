@@ -71,6 +71,24 @@ public interface IUserRepository
     /// Refused when the address already belongs to someone else.
     /// </summary>
     Task<EmailChangeResult> ChangeEmailAsync(Guid userId, string newEmail, DateTimeOffset now, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Removes the person from one app, as one change. Their sessions for that app and their record of using it go. When no other app
+    /// has them, the person goes too: their sign-in identities, the sign-in codes sent to those addresses, every session, and the
+    /// account itself, so nothing that says who they are is kept. Repeating it after it succeeded finds no such person.
+    /// </summary>
+    Task<AccountDeletion> DeleteAccountAsync(Guid userId, int clientId, CancellationToken cancellationToken);
+}
+
+public enum AccountDeletion
+{
+    /// <summary>The person had no other app, so the whole account was removed.</summary>
+    AccountRemoved,
+
+    /// <summary>The person also uses another app, so only their place in this one was removed; they can still sign in to the other.</summary>
+    LeftApp,
+
+    NoSuchUser,
 }
 
 public enum GoogleSignInStatus
@@ -160,8 +178,11 @@ public sealed record IssuedAccessToken(string Token, DateTimeOffset ExpiresUtc);
 
 public interface IAccessTokenIssuer
 {
-    /// <summary>A token for this person, addressed to the app's audience.</summary>
-    IssuedAccessToken Issue(User user, Client client, DateTimeOffset now);
+    /// <summary>
+    /// A token for this person, addressed to the app's audience. <paramref name="signedInUtc"/> is when the person last proved who they
+    /// are (the sign-in their session started from); it is in the token as <c>auth_time</c> so an app can ask for a recent one.
+    /// </summary>
+    IssuedAccessToken Issue(User user, Client client, DateTimeOffset now, DateTimeOffset? signedInUtc = null);
 }
 
 /// <summary>The public half of a signing key, as published for apps to validate tokens with.</summary>

@@ -35,6 +35,34 @@ public sealed class RefreshTokensHandlerTests
     }
 
     [Fact]
+    public async Task EveryAccessTokenCarriesTheSignInTimeOfItsSessionNotTheTimeOfTheRefresh()
+    {
+        var world = new SignInWorld();
+        var signedInAt = world.Clock.GetUtcNow();
+        var first = await world.SignInAsync();
+
+        world.Clock.Advance(TimeSpan.FromHours(3));
+        var second = (await world.RefreshAsync(first.RefreshToken)).Value!;
+        world.Clock.Advance(TimeSpan.FromDays(2));
+        await world.RefreshAsync(second.RefreshToken);
+
+        world.Tokens.SignedIn.ShouldBe([signedInAt, signedInAt, signedInAt]);
+    }
+
+    [Fact]
+    public async Task ANewSignInOnAnotherDeviceHasItsOwnSignInTime()
+    {
+        var world = new SignInWorld();
+        var firstAt = world.Clock.GetUtcNow();
+        await world.SignInAsync();
+        world.Clock.Advance(TimeSpan.FromHours(1));
+        var secondAt = world.Clock.GetUtcNow();
+        await world.SignInAsync();
+
+        world.Tokens.SignedIn.ShouldBe([firstAt, secondAt]);
+    }
+
+    [Fact]
     public async Task RefreshingReturnsANewPairAndRevokesTheOldRefreshToken()
     {
         var world = new SignInWorld();

@@ -13,7 +13,7 @@ internal static class SessionIssuer
         var chain = RefreshToken.StartChain(user.Id, client.Id, refreshHash, now);
         await refreshTokens.AddAsync(chain, cancellationToken).ConfigureAwait(false);
 
-        var access = tokenIssuer.Issue(user, client, now);
+        var access = tokenIssuer.Issue(user, client, now, chain.SignedInAt);
         return new AuthTokensDto(access.Token, access.ExpiresUtc, refreshToken, chain.ExpiresUtc, isNewUser);
     }
 }

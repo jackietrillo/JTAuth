@@ -13,6 +13,7 @@ Steps 1 (solution skeleton), 2 (database and client seed), 3 (email-code sign-in
 | `POST /api/v1/auth/refresh`, `/logout` | Swap a refresh token for a new pair; end the session |
 | `GET`/`PUT /api/v1/profile` | Display name and sign-in methods (access token required) |
 | `POST /api/v1/profile/email/request-code`, `/email/verify` | Change the sign-in email with a code sent to the new address |
+| `DELETE /api/v1/profile` | Delete the person's account for the app the token is for (needs a sign-in within the last 10 minutes, the token's `auth_time`; removes the whole account when no other app has the person) |
 | `GET /.well-known/jwks.json`, `/openid-configuration` | The public keys apps validate tokens with |
 
 ## Build and test

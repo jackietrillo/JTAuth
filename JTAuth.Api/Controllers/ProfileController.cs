@@ -14,8 +14,18 @@ public sealed class ProfileController(
     IQueryHandler<GetProfileQuery, ProfileDto> getProfile,
     ICommandHandler<UpdateDisplayNameCommand, ProfileDto> updateDisplayName,
     ICommandHandler<RequestEmailChangeCommand, CodeRequestedDto> requestEmailChange,
-    ICommandHandler<ConfirmEmailChangeCommand, ProfileDto> confirmEmailChange) : ApiController
+    ICommandHandler<ConfirmEmailChangeCommand, ProfileDto> confirmEmailChange,
+    ICommandHandler<DeleteAccountCommand, AccountDeletedDto> deleteAccount) : ApiController
 {
+    /// <summary>
+    /// Deletes the person's account for the app the token was issued for: their sessions and sign-in identities go when no other app has
+    /// them, otherwise only their place in this app. Needs a sign-in within the last ten minutes (the token's <c>auth_time</c>), or answers
+    /// 403 with code <c>recent_sign_in_required</c>. After it succeeds the token still passes until it expires, but the person is gone.
+    /// </summary>
+    [HttpDelete]
+    public async Task<ActionResult<AccountDeletedDto>> Delete(CancellationToken cancellationToken) =>
+        Respond(await deleteAccount.HandleAsync(new DeleteAccountCommand(CurrentUserId, CurrentAudience, SignedInUtc), cancellationToken));
+
     [HttpGet]
     public async Task<ActionResult<ProfileDto>> Get(CancellationToken cancellationToken) =>
         Respond(await getProfile.HandleAsync(new GetProfileQuery(CurrentUserId), cancellationToken));

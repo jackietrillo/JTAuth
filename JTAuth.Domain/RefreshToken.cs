@@ -53,15 +53,22 @@ public sealed record RefreshToken(
     byte[] TokenHash,
     DateTimeOffset ExpiresUtc,
     DateTimeOffset? RevokedUtc,
-    DateTimeOffset CreatedUtc)
+    DateTimeOffset CreatedUtc,
+    DateTimeOffset? SignedInUtc = null)
 {
+    /// <summary>
+    /// When the person last proved who they are: the sign-in that started this chain, carried unchanged through every replacement.
+    /// A token stored before the time was kept has none, and its creation time stands in.
+    /// </summary>
+    public DateTimeOffset SignedInAt => SignedInUtc ?? CreatedUtc;
+
     /// <summary>The first token of a new chain, for a person who has just signed in. The database assigns the id.</summary>
     public static RefreshToken StartChain(Guid userId, int clientId, byte[] tokenHash, DateTimeOffset now) =>
-        new(0, userId, clientId, Guid.NewGuid(), tokenHash, now + RefreshTokenRules.Lifetime, null, now);
+        new(0, userId, clientId, Guid.NewGuid(), tokenHash, now + RefreshTokenRules.Lifetime, null, now, now);
 
-    /// <summary>The next token in this token's chain, for the same person and app, valid from <paramref name="now"/>.</summary>
+    /// <summary>The next token in this token's chain, for the same person and app, valid from <paramref name="now"/>. Its sign-in time is the chain's, not <paramref name="now"/>.</summary>
     public RefreshToken Next(byte[] tokenHash, DateTimeOffset now) =>
-        new(0, UserId, ClientId, FamilyId, tokenHash, now + RefreshTokenRules.Lifetime, null, now);
+        new(0, UserId, ClientId, FamilyId, tokenHash, now + RefreshTokenRules.Lifetime, null, now, SignedInAt);
 
     /// <summary>Revoked wins over expired, so a used token that has also run out is still treated as a reuse.</summary>
     public RefreshTokenState StateAt(DateTimeOffset now)

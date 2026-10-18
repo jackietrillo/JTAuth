@@ -197,6 +197,58 @@ public sealed class UserRepository(JTAuthDatabase database) : IUserRepository
         }
     }
 
+    public async Task<AccountDeletion> DeleteAccountAsync(Guid userId, int clientId, CancellationToken cancellationToken)
+    {
+        await using var connection = await database.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        // The person is locked for the whole change, so a sign-in to another app cannot slip in between "no other app has them" and the delete.
+        var exists = await connection.ExecuteScalarAsync<bool>(new CommandDefinition(
+            "SELECT CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.[User] WITH (UPDLOCK, HOLDLOCK) WHERE Id = @userId) THEN 1 ELSE 0 END AS bit);",
+            new { userId }, transaction, cancellationToken: cancellationToken)).ConfigureAwait(false);
+        if (!exists)
+        {
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            return AccountDeletion.NoSuchUser;
+        }
+
+        var usesAnotherApp = await connection.ExecuteScalarAsync<bool>(new CommandDefinition(
+            """
+            SELECT CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.UserClient WHERE UserId = @userId AND ClientId <> @clientId)
+                          OR EXISTS (SELECT 1 FROM dbo.RefreshToken WHERE UserId = @userId AND ClientId <> @clientId) THEN 1 ELSE 0 END AS bit);
+            """,
+            new { userId, clientId }, transaction, cancellationToken: cancellationToken)).ConfigureAwait(false);
+
+        // A refresh token points at the one that replaced it, so those links are cut before the rows go.
+        await connection.ExecuteAsync(new CommandDefinition(
+            """
+            UPDATE dbo.RefreshToken SET ReplacedByTokenId = NULL WHERE UserId = @userId AND (@everything = 1 OR ClientId = @clientId);
+            DELETE dbo.RefreshToken WHERE UserId = @userId AND (@everything = 1 OR ClientId = @clientId);
+            DELETE dbo.UserClient WHERE UserId = @userId AND (@everything = 1 OR ClientId = @clientId);
+            """,
+            new { userId, clientId, everything = usesAnotherApp ? 0 : 1 }, transaction, cancellationToken: cancellationToken)).ConfigureAwait(false);
+
+        if (usesAnotherApp)
+        {
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return AccountDeletion.LeftApp;
+        }
+
+        // Nothing is left that says who they are: the codes sent to their addresses, their identities, then the person.
+        await connection.ExecuteAsync(new CommandDefinition(
+            """
+            DELETE lc FROM dbo.LoginCode lc
+            JOIN dbo.UserIdentity ui ON ui.Provider = lc.Provider AND ui.ProviderSubject = lc.ProviderSubject
+            WHERE ui.UserId = @userId;
+            DELETE dbo.UserIdentity WHERE UserId = @userId;
+            DELETE dbo.[User] WHERE Id = @userId;
+            """,
+            new { userId }, transaction, cancellationToken: cancellationToken)).ConfigureAwait(false);
+
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return AccountDeletion.AccountRemoved;
+    }
+
     private static async Task<User?> FindAsync(
         SqlConnection connection, IdentityProvider provider, string providerSubject, CancellationToken cancellationToken, SqlTransaction? transaction = null)
     {
