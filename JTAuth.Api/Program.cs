@@ -42,10 +42,14 @@ builder.Services.AddJTAuthInfrastructure(connectionString, signingKeyFile);
 builder.Services.AddHandlers(AuthApplication.Assembly);
 
 // Codes are written to the log in Development. There is no real email service yet, so any other environment refuses to start
-// rather than silently dropping the code or logging it.
+// rather than silently dropping the code or logging it, unless JTAuth:ShowCodeWithoutEmail hands the code to the page instead.
 if (builder.Environment.IsDevelopment())
 {
     builder.Services.AddSingleton<JTAuth.Application.IEmailSender, LoggingEmailSender>();
+}
+else if (settings.ShowCodeWithoutEmail)
+{
+    builder.Services.AddSingleton<JTAuth.Application.IEmailSender, NoEmailSender>();
 }
 else
 {

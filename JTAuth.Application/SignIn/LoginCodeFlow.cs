@@ -13,8 +13,8 @@ internal static class LoginCodeFlow
     public const string TooManyRequestsCode = "too_many_code_requests";
 
     /// <summary>
-    /// Applies the per-address limits, stores a new code (which ends the older open ones) and emails it, naming the app.
-    /// Never looks at whether the address has an account.
+    /// Applies the per-address limits, stores a new code (which ends the older open ones) and emails it, naming the app; while codes
+    /// are shown without email, the answer carries the code. Never looks at whether the address has an account.
     /// </summary>
     public static async Task<Result<CodeRequestedDto>> IssueAsync(
         ILoginCodeRepository codes, IEmailSender emailSender, JTAuthSettings settings, DateTimeOffset now, Client client, string email, CancellationToken cancellationToken)
@@ -31,7 +31,7 @@ internal static class LoginCodeFlow
         await codes.ReplaceAsync(stored, now, cancellationToken).ConfigureAwait(false);
         await emailSender.SendLoginCodeAsync(email, client.Name, code, stored.ExpiresUtc, cancellationToken).ConfigureAwait(false);
 
-        return Result.Success(new CodeRequestedDto((int)LoginCodeRules.Lifetime.TotalSeconds));
+        return Result.Success(new CodeRequestedDto((int)LoginCodeRules.Lifetime.TotalSeconds, settings.ShowCodeWithoutEmail ? code : null));
     }
 
     /// <summary>

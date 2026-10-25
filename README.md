@@ -61,7 +61,7 @@ curl.exe -X POST https://localhost:7200/api/v1/auth/code/verify -H "Content-Type
 
 **Google Sign-In:** in the Google Cloud console create an OAuth client of type *Web application* (consent screen in Testing mode with your own account as a test user, authorized JavaScript origin `http://localhost:5100`) and put its **client id** (it ends in `.apps.googleusercontent.com`) in `JTAuth:GoogleClientIds`. Only the id is needed: never the client secret, and never commit the downloaded JSON file. Add one id per environment and per phone platform later.
 
-Settings (`JTAuth` section): `Issuer` (the API's public URL), `CodeSecret` (keys the stored code hashes), `SigningKeyFile` (defaults in Development to `%LOCALAPPDATA%\JTAuth\signing-key.json`, generated on first run and never committed), and the per-address code limits. `RateLimits` holds the per-IP limits. Outside Development the API refuses to start until a real email sender is registered.
+Settings (`JTAuth` section): `Issuer` (the API's public URL), `CodeSecret` (keys the stored code hashes), `SigningKeyFile` (defaults in Development to `%LOCALAPPDATA%\JTAuth\signing-key.json`, generated on first run and never committed), and the per-address code limits. `RateLimits` holds the per-IP limits. Outside Development the API refuses to start until a real email sender is registered, unless `ShowCodeWithoutEmail` is true: then no email is sent and the code comes back in the code request's answer for the page to fill in (on in Development; it lets anyone sign in as any address, so turn it off once email works).
 
 ## Layout
 

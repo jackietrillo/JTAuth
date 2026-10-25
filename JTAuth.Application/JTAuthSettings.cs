@@ -20,6 +20,12 @@ public sealed class JTAuthSettings
     /// <summary>The configured Google client ids without blank entries, which would otherwise match a token that names no audience.</summary>
     public IReadOnlyList<string> UsableGoogleClientIds => GoogleClientIds.Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => id.Trim()).ToList();
 
+    /// <summary>
+    /// While there is no email service: the code is returned in the answer to the code request, for the page to fill in, and no email
+    /// is sent. Anyone who types an address can then sign in as it, so this is for testing and must be off once email works.
+    /// </summary>
+    public bool ShowCodeWithoutEmail { get; set; }
+
     /// <summary>At most this many codes per email address in any one minute.</summary>
     public int CodeRequestsPerAddressPerMinute { get; set; } = 1;
 

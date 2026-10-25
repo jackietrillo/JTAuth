@@ -26,6 +26,21 @@ public sealed class RequestLoginCodeHandlerTests
     }
 
     [Fact]
+    public async Task TheAnswerCarriesNoCodeUnlessCodesAreShownWithoutEmail()
+    {
+        var world = new SignInWorld();
+
+        (await Ask(world)).Value!.Code.ShouldBeNull("with email, the code only travels by email");
+
+        world.Settings.ShowCodeWithoutEmail = true;
+        world.Clock.Advance(TimeSpan.FromMinutes(2));
+        var shown = await Ask(world);
+
+        shown.Value!.Code.ShouldBe(world.Email.Last.Code, "the page gets the same code that would have been emailed");
+        (await world.VerifyAsync(shown.Value.Code!)).IsSuccess.ShouldBeTrue("and it signs the person in");
+    }
+
+    [Fact]
     public async Task EmailNamesEachAppByItsOwnName()
     {
         var world = new SignInWorld();

@@ -7,8 +7,11 @@ namespace JTAuth.Contracts;
 /// <summary>Starts a sign-in: JTAuth emails a one-time code to the address.</summary>
 public sealed record RequestCodeRequest(string ClientId, string Email);
 
-/// <summary>The answer to a code request. It is the same for every address, whether or not it has an account.</summary>
-public sealed record CodeRequestedDto(int ExpiresInSeconds);
+/// <summary>
+/// The answer to a code request. It is the same for every address, whether or not it has an account. <see cref="Code"/> is the code
+/// itself, only while the server shows codes instead of emailing them (<c>JTAuth:ShowCodeWithoutEmail</c>); otherwise it is null.
+/// </summary>
+public sealed record CodeRequestedDto(int ExpiresInSeconds, string? Code = null);
 
 /// <summary>Finishes a sign-in with the code from the email. Signing up and signing in are the same step.</summary>
 public sealed record VerifyCodeRequest(string ClientId, string Email, string Code);
